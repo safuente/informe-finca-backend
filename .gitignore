@@ -216,3 +216,11 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Capas de referencia descargadas para ogr2ogr (varios GB, no versionables)
+data/
+
+# Informes generados en local
+*.pdf
+demo-report.html
+.DS_Store

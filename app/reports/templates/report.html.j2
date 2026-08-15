@@ -1,0 +1,301 @@
+{#
+  Informe técnico de parcela rústica — plantilla de producto.
+  Deriva de templates/report-professional.html del repo del frontend: mismos tokens de
+  color, misma tipografía de datos y mismas reglas de redacción (severidad + confianza).
+  Sin fuentes remotas: el PDF se renderiza en el worker y una webfont que no carga
+  reflowaría un documento pensado para ser citable.
+#}
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>Informe técnico de parcela rústica · {{ parcel.refcat }}</title>
+<style>
+@page { size: A4; margin: 16mm 14mm 18mm; }
+:root{
+  --ink:#1c2420; --paper:#ffffff; --soft:#f5f6f3;
+  --pine:#2f5a41; --magenta:#8f1450;
+  --amber:#9a6013; --red:#96352a; --ok:#2f6a42; --water:#2f5a80;
+  --line:#dcdfd8; --mut:#61695f;
+}
+*{box-sizing:border-box;margin:0}
+body{background:var(--paper);color:var(--ink);font:10.5pt/1.5 "DejaVu Sans",sans-serif}
+.wrap{max-width:860px;margin:0 auto}
+h1,h2{font-family:"DejaVu Serif",Georgia,serif;line-height:1.2}
+h2{font-size:1.1rem;margin:0 0 2px}
+section{padding:16px 0;border-bottom:1px solid var(--line)}
+/* Nada de `page-break-inside:avoid` en la sección: la multitemporal mide más que una
+   página y, al no poder cumplirse, WeasyPrint rompía dejando el epígrafe solo en una hoja.
+   Lo que no debe partirse son las piezas pequeñas —una figura, una fila— y un título nunca
+   debe quedar separado de lo que titula. */
+figure,tr,.note{break-inside:avoid}
+.sec-num,h1,h2{break-after:avoid}
+.sec-num{font:600 .66rem/1 "DejaVu Sans Mono",monospace;letter-spacing:.14em;color:var(--magenta);text-transform:uppercase;display:block;margin-bottom:6px}
+.mono{font-family:"DejaVu Sans Mono",monospace}
+.demo{background:#faf4e6;border:1px solid #e5d3a6;color:#8a6a1f;border-radius:6px;padding:8px 14px;margin:0 0 16px;font-size:.8rem;text-align:center}
+header.doc{padding:0 0 16px;border-bottom:3px solid var(--ink)}
+header.doc h1{font-size:1.4rem;font-weight:700}
+.meta{font-family:"DejaVu Sans Mono",monospace;font-size:.72rem;color:var(--mut);margin-top:10px;line-height:1.8}
+.meta b{color:var(--ink);font-weight:600}
+.dictamen{border:1.5px solid var(--ink);border-radius:6px;overflow:hidden;margin-top:14px}
+.dictamen .lbl{background:var(--ink);color:#fff;font:600 .64rem/1 "DejaVu Sans Mono",monospace;letter-spacing:.14em;padding:7px 12px;text-transform:uppercase}
+.dictamen .val{padding:10px 14px;font-family:"DejaVu Serif",Georgia,serif;font-weight:700;font-size:1rem;color:var(--amber)}
+.dictamen .sub{padding:0 14px 10px;font-size:.76rem;color:var(--mut)}
+table{border-collapse:collapse;width:100%;font-size:.84rem;margin-top:10px}
+/* Anchos fijos en la tabla de hallazgos: con el reparto automático, la cadena
+   "Confianza: ALTA (dato oficial)" en monoespaciada ensanchaba su columna hasta comerse
+   media página, dejando el texto del hallazgo —lo que de verdad se lee— en una franja
+   estrecha y el resto en blanco. */
+table.findings{table-layout:fixed}
+/* 78 px se quedaban cortos: el chip "OBSERVACIÓN" mide más que eso y quedaba pegado al
+   texto del hallazgo. Ancho suficiente para la etiqueta más larga, más un canalón propio
+   para que la severidad se lea como una columna y no como parte de la frase. */
+table.findings th:first-child,table.findings td:first-child{width:104px;padding-right:16px}
+table.findings th:last-child,table.findings td:last-child{width:128px}
+/* La fuente, más pequeña y compacta: en los hallazgos de una línea era su columna la que
+   marcaba la altura de la fila —"Banco de Datos de la Naturaleza · MITECO" ocupaba cuatro
+   líneas— y dejaba el hueco a la izquierda. La atribución completa con licencia va en el
+   pie, que es su sitio. */
+table.findings td:last-child{font-size:.76rem;line-height:1.35;word-break:break-word}
+th{font:600 .64rem/1.3 "DejaVu Sans Mono",monospace;letter-spacing:.08em;text-transform:uppercase;color:var(--mut);border-bottom:1.5px solid var(--ink);padding:7px 9px;text-align:left}
+td{border-bottom:1px solid var(--line);padding:8px 9px;vertical-align:top}
+td.num{text-align:right;font-family:"DejaVu Sans Mono",monospace}
+.chip{display:inline-block;font:600 .62rem/1 "DejaVu Sans Mono",monospace;border-radius:4px;padding:4px 7px;white-space:nowrap}
+.c-crit{background:#f6e9e6;color:var(--red)} .c-warn{background:#f7efdd;color:var(--amber)}
+.c-ok{background:#e9f1ea;color:var(--ok)}  .c-info{background:#e8eef5;color:var(--water)}
+.conf{font:500 .62rem/1.3 "DejaVu Sans Mono",monospace;color:var(--mut);display:block;margin-top:3px}
+figure{margin:0} figure img,figure svg{width:100%;border:1px solid var(--line);border-radius:4px;display:block}
+figcaption{font-size:.74rem;color:var(--mut);margin-top:5px;line-height:1.5}
+figcaption b{color:var(--ink)}
+/* inline-block y no flex: WeasyPrint no fragmenta bien un contenedor flex y trataba la
+   serie entera como un bloque indivisible, dejando el título solo en una página. Con
+   inline-block la serie se parte entre filas y el epígrafe se queda con sus fotos. */
+/* Tres por fila y no dos: con dos, la serie de seis medía más de una página, no cabía
+   entera en ninguna y WeasyPrint la empujaba a la siguiente dejando el epígrafe solo en
+   una hoja en blanco. Con tres caben en dos filas y la sección entra completa. */
+.timeline{margin-top:12px;font-size:0}
+.timeline figure{display:inline-block;width:32%;vertical-align:top;margin:0 0 10px 0;font-size:10.5pt}
+.timeline figure:not(:nth-child(3n+1)){margin-left:2%}
+.note{font-size:.82rem;background:var(--soft);border-radius:6px;padding:11px 14px;margin-top:12px}
+.src{font:400 .68rem/1.5 "DejaVu Sans Mono",monospace;color:var(--mut);margin-top:8px}
+ol.rec{margin:10px 0 0 1.1rem} ol.rec li{margin:.5rem 0;font-size:.86rem}
+ul.caveats{margin:10px 0 0 1.1rem;font-size:.82rem;color:var(--amber)}
+footer{font-size:.7rem;color:var(--mut);margin-top:20px;line-height:1.7}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+{% if demo %}
+<div class="demo">DOCUMENTO DE DEMOSTRACIÓN — datos e imágenes simulados</div>
+{% endif %}
+
+<header class="doc">
+  <h1>Informe técnico de parcela rústica</h1>
+  <div class="meta">
+    REF. CATASTRAL <b>{{ parcel.refcat }}</b><br>
+    {{ parcel.municipality }}{% if parcel.province %} ({{ parcel.province }}){% endif %}<br>
+    Centroide <b>{{ parcel.lat | round(5) }}, {{ parcel.lon | round(5) }}</b> (ETRS89) ·
+    Emitido <b>{{ generated_at[:10] }}</b> · Nº <b>{{ reference }}</b>
+  </div>
+  <div class="dictamen">
+    <div class="lbl">Dictamen</div>
+    <div class="val">{{ dictamen.verdict }}</div>
+    <div class="sub">{{ dictamen.summary }}</div>
+  </div>
+</header>
+
+<!-- RESUMEN EJECUTIVO -->
+<section>
+  <span class="sec-num">Resumen ejecutivo</span>
+  <h2>Hallazgos</h2>
+  <table class="findings">
+    <tr><th>Severidad</th><th>Hallazgo</th><th>Fuente</th></tr>
+    {% for finding in findings %}
+    <tr>
+      <td><span class="chip {{ severity_class.get(finding.severity, 'c-info') }}">{{ finding.severity }}</span></td>
+      <td><b>{{ finding.title }}.</b> {{ finding.detail }}</td>
+      <td>{{ finding.source }}<br><span class="conf">{{ finding.confidence }}{% if finding.confidence == 'MEDIA' %} · inferencia{% else %} · oficial{% endif %}</span></td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% if caveats %}
+  <ul class="caveats">
+    {% for caveat in caveats %}<li>{{ caveat }}</li>{% endfor %}
+  </ul>
+  {% endif %}
+</section>
+
+<!-- 1 IDENTIFICACIÓN -->
+<section>
+  <span class="sec-num">1 · Identificación</span>
+  <h2>Datos catastrales y superficie</h2>
+  <table>
+    <tr><th style="width:46%">Concepto</th><th>Valor</th></tr>
+    <tr><td>Referencia catastral</td><td class="mono">{{ parcel.refcat }}</td></tr>
+    <tr><td>Municipio · Provincia</td><td>{{ parcel.municipality }} · {{ parcel.province }}</td></tr>
+    <tr><td>Uso catastral</td><td>{{ parcel.use or '—' }}</td></tr>
+    <tr><td>Superficie declarada (Catastro)</td><td class="num">{{ parcel.cadastral_area_m2 | es_number }} m²</td></tr>
+    <tr><td>Superficie medida (geometría INSPIRE, EPSG:25830)</td><td class="num">{{ parcel.measured_area_m2 | es_number }} m²</td></tr>
+    <tr><td>Diferencia</td><td class="num">{{ area.difference_ratio | es_percent }}</td></tr>
+    <tr><td>Superficie construida declarada</td><td class="num">{{ parcel.built_area_m2 | es_number }} m²</td></tr>
+  </table>
+  <div class="src">Fuente: Dirección General del Catastro (servicios OVC e INSPIRE). Superficie medida calculada por PostGIS sobre la geometría oficial reproyectada a ETRS89 / UTM 30N.</div>
+</section>
+
+<!-- 2 APROVECHAMIENTO -->
+<section>
+  <span class="sec-num">2 · Aprovechamiento</span>
+  <h2>Subparcelas de cultivo y actividad vegetal</h2>
+  {% if parcel.subplots %}
+  <table>
+    <tr><th>Cultivo</th><th style="width:110px">Intensidad</th><th style="width:130px">Superficie</th></tr>
+    {% for subplot in parcel.subplots %}
+    <tr>
+      <td>{{ subplot.crop or '—' }}</td>
+      <td class="mono">{{ subplot.intensity or '—' }}</td>
+      <td class="num">{{ subplot.area_m2 | es_number }} m²</td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% else %}
+  <p class="src">El Catastro no detalla subparcelas de cultivo para esta parcela.</p>
+  {% endif %}
+
+  {% if chart %}
+  <figure style="margin-top:14px">
+    <svg viewBox="0 0 {{ chart.width }} {{ chart.height }}" style="background:#fafbf8">
+      <g stroke="#e3e6df" stroke-width="1">
+        {% for line in chart.gridlines %}
+        <line x1="{{ chart.left }}" y1="{{ line.y | round(0) }}" x2="{{ chart.right }}" y2="{{ line.y | round(0) }}"/>
+        {% endfor %}
+      </g>
+      <g font-family="DejaVu Sans Mono,monospace" font-size="9.5" fill="#61695f">
+        {% for line in chart.gridlines %}
+        <text x="12" y="{{ (line.y + 3) | round(0) }}">{{ line.label }}</text>
+        {% endfor %}
+        {% for year in chart.year_labels %}
+        <text x="{{ year.x | round(0) }}" y="{{ chart.height - 8 }}">{{ year.label }}</text>
+        {% endfor %}
+      </g>
+      <polyline fill="none" stroke="#2f6a42" stroke-width="2" points="{{ chart.points }}"/>
+    </svg>
+    <figcaption><b>NDVI medio mensual de la parcela, {{ chart.first_month }}–{{ chart.last_month }}</b>
+      (Sentinel-2 L2A, media espacial sobre la geometría catastral, nubes &lt;30%).</figcaption>
+  </figure>
+  <div class="note"><b>Cómo leerlo.</b> El NDVI mide vigor vegetal, no uso agrícola: un barbecho
+    prolongado produce una señal muy parecida a la del abandono, y una cubierta de matorral puede
+    dar valores altos sin que exista cultivo. La interpretación del resumen ejecutivo es una
+    inferencia (confianza MEDIA) y requiere confirmación en campo o con el histórico PAC.</div>
+  {% else %}
+  <p class="src">Serie NDVI no disponible para esta parcela (sin credenciales de Copernicus o sin
+    observaciones suficientemente libres de nubes).</p>
+  {% endif %}
+</section>
+
+<!-- 3 MULTITEMPORAL -->
+{% if orthophotos %}
+<section>
+  <span class="sec-num">3 · Análisis multitemporal</span>
+  <h2>Ortofotografía oficial</h2>
+  <div class="timeline">
+    {% for image in orthophotos %}
+    <figure>
+      <img src="data:image/png;base64,{{ image.png_base64 }}" alt="{{ image.title }}">
+      <figcaption><b>{{ image.title }}.</b></figcaption>
+    </figure>
+    {% endfor %}
+  </div>
+  <div class="note"><b>Valor probatorio.</b> Las ortofotos del PNOA y los vuelos históricos del IGN
+    son documentos oficiales fechados. Si una edificación aparece en un vuelo determinado y no en el
+    anterior, queda acotada su antigüedad mínima, dato relevante para una eventual declaración de
+    fuera de ordenación o prescripción urbanística. La calificación urbanística concreta debe
+    consultarse en el planeamiento municipal.</div>
+</section>
+{% endif %}
+
+<!-- 4 AFECCIONES -->
+<section>
+  <span class="sec-num">4 · Afecciones y riesgos</span>
+  <h2>Inundabilidad, protección ambiental y dominio público</h2>
+  {% if layers %}
+  <table>
+    <tr><th style="width:210px">Afección</th><th>Resultado</th><th style="width:130px">Estado</th></tr>
+    {% for layer in layers %}
+    <tr>
+      <td>{{ layer.label }}</td>
+      <td>
+        {% if layer.intersects and layer.geometry == 'line' %}
+          El eje discurre {{ layer.length_m | es_number }} m dentro de la parcela{% if layer.feature_names %}: {{ layer.feature_names | join(', ') }}{% endif %}. Anchura legal a verificar en el acto de clasificación.
+        {% elif layer.intersects %}
+          Intersección de {{ layer.area_m2 | es_number }} m² ({{ layer.area_ratio | es_percent }} de la parcela){% if layer.feature_names %}: {{ layer.feature_names | join(', ') }}{% endif %}.
+        {% else %}
+          Sin intersección en la cartografía oficial consultada.{% if layer.nearest_name %}
+          Elemento más próximo: «{{ layer.nearest_name }}», a {{ (layer.nearest_distance_m / 1000) | es_number(1) }} km.{% endif %}
+        {% endif %}
+      </td>
+      <td>
+        {% if layer.intersects %}<span class="chip c-info">AFECCIÓN</span>
+        {% else %}<span class="chip c-ok">SIN AFECCIÓN</span>{% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% else %}
+  <p class="src">No hay capas de afección cargadas para esta zona; las intersecciones no se han
+    podido comprobar (ver salvedades del resumen ejecutivo).</p>
+  {% endif %}
+  <div class="src">Consultas geométricas ejecutadas sobre la parcela INSPIRE en la fecha de emisión.
+    La ausencia de afección cartografiada no garantiza la ausencia del riesgo físico correspondiente.</div>
+</section>
+
+<!-- 5 POTENCIAL -->
+{% if solar %}
+<section>
+  <span class="sec-num">5 · Potencial de aprovechamiento</span>
+  <h2>Indicadores</h2>
+  <table>
+    <tr><th style="width:46%">Indicador</th><th style="width:24%">Valor</th><th>Referencia</th></tr>
+    <tr>
+      <td>Producción FV específica (fijo, 14% pérdidas)</td>
+      <td class="num">{{ solar.kwh_per_kwp_year | es_number }} kWh/kWp·año</td>
+      <td>Umbral habitual de promotores ≈ 1.600 kWh/kWp·año</td>
+    </tr>
+    {% if solar.optimal_slope_deg %}
+    <tr>
+      <td>Inclinación óptima calculada</td>
+      <td class="num">{{ solar.optimal_slope_deg | es_number(1) }}°</td>
+      <td>PVGIS, orientación sur</td>
+    </tr>
+    {% endif %}
+  </table>
+  <div class="src">La aptitud fotovoltaica no implica viabilidad: depende de la capacidad de
+    evacuación del nudo más próximo y del planeamiento urbanístico aplicable.</div>
+</section>
+{% endif %}
+
+<!-- 6 RECOMENDACIONES -->
+<section>
+  <span class="sec-num">6 · Recomendaciones previas a la transmisión</span>
+  <h2>Actuaciones</h2>
+  <ol class="rec">
+    {% for item in recommendations %}<li>{{ item }}</li>{% endfor %}
+  </ol>
+</section>
+
+<footer>
+  <b>Metodología y fuentes.</b>
+  {% for source in sources %}{{ source }}{% if not loop.last %} · {% endif %}{% endfor %}.
+  Todas las consultas se ejecutan sobre la geometría catastral en la fecha de emisión indicada en
+  cabecera.<br><br>
+  <b>Alcance y limitaciones.</b> Documento informativo elaborado automáticamente a partir de fuentes
+  públicas oficiales. No constituye tasación, dictamen pericial, asesoramiento jurídico ni
+  urbanístico. No acredita titularidad ni cargas —competencia del Registro de la Propiedad— ni
+  sustituye la inspección presencial. Los hallazgos con confianza MEDIA son inferencias que
+  requieren verificación. La ausencia de afección cartografiada no garantiza la ausencia del riesgo
+  físico correspondiente.
+</footer>
+
+</div>
+</body>
+</html>
