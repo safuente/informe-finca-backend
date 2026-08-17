@@ -54,6 +54,38 @@ def test_low_ndvi_is_an_inference_not_a_verdict():
     assert "abandonada" not in finding.detail.lower()
 
 
+def test_on_scrubland_ndvi_does_not_claim_farming():
+    """El mismo 0,54 significa cosas distintas según lo que haya en el suelo.
+
+    En monte bajo la vegetación está todo el año: un NDVI alto solo confirma que hay
+    matorral —lo que ya declara el Catastro— y no puede insinuar aprovechamiento agrícola.
+    """
+    monte = [{"crop": "MONTE BAJO", "intensity": "07", "area_m2": 1_269_480.0}]
+    finding = interpret.ndvi_finding(ndvi([0.54] * 12), monte)
+
+    assert finding.severity is Severity.CONFORME
+    assert finding.confidence is Confidence.MEDIA
+    assert "no permite deducir uso agrícola" in finding.detail
+    assert "cultivo o pasto en uso" not in finding.detail
+
+
+def test_on_cropland_ndvi_keeps_its_edge():
+    """En labor sí discrimina: ahí es donde el ciclo, o su ausencia, vale dinero."""
+    labor = [{"crop": "LABOR O LABRADIO SECANO", "intensity": "03", "area_m2": 15_200.0}]
+
+    activa = interpret.ndvi_finding(ndvi([0.54] * 12), labor)
+    assert "compatible con cultivo o pasto en uso" in activa.detail
+
+    plana = interpret.ndvi_finding(ndvi([0.18] * 12), labor)
+    assert plana.severity is Severity.OBSERVACION
+    assert "barbecho" in plana.detail
+
+
+def test_without_declared_crop_it_keeps_the_generic_reading():
+    finding = interpret.ndvi_finding(ndvi([0.54] * 12), [])
+    assert "compatible con cultivo o pasto en uso" in finding.detail
+
+
 def test_high_ndvi_is_still_an_inference():
     finding = interpret.ndvi_finding(ndvi([0.6] * 12))
     assert finding.severity is Severity.CONFORME

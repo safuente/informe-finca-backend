@@ -121,6 +121,19 @@ orthophotos, solar, ndvi = await asyncio.gather(
 | **PVGIS** | kWh/kWp·año e inclinación óptima | Se omite el apartado de potencial |
 | **Copernicus** | Serie NDVI mensual de 8 años | Se omite; sin credenciales CDSE ni se intenta |
 
+Sobre el coste de Copernicus, medido y no estimado: una serie completa de 8 años sobre una
+parcela de 127 ha consume **unas 10,5 processing units**, y la cuota gratuita del plan
+general son 30.000 PU al mes. Eso da del orden de **2.800 informes mensuales** antes de
+agotarla, y el consumo escala con el tamaño de la finca, así que una parcela normal sale
+bastante más barata. La cuota no es una restricción del negocio; si algún día lo fuera, el
+dashboard de CDSE muestra el consumo real.
+
+Dos detalles de esa integración que costaron encontrar y conviene no volver a romper:
+`resx`/`resy` van **en las unidades del CRS que se manda**, así que con la geometría en
+EPSG:4326 hay que expresarlos en grados —convertidos desde los 10 m nativos de Sentinel-2
+según la latitud—; y mandar la geometría en EPSG:25830 para poder pedir metros **no vale**,
+porque la colección no acepta ese CRS y responde con un 500 opaco.
+
 Ninguno puede tumbar el informe: cada cliente degrada a `None` o lista vacía por su cuenta.
 Van concurrentes porque son independientes y el más lento manda.
 

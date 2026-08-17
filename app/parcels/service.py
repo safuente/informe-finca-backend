@@ -13,7 +13,7 @@ from app.parcels.exceptions import ParcelUnavailable
 from app.parcels.models import Parcel
 from app.parcels.repository import ParcelRepository
 from app.parcels.schemas import AreaComparison, ParcelPreview, Subplot
-from app.shared.geo import as_multipolygon_wkt
+from app.shared.geo import SRID_WGS84, as_multipolygon_wkt
 
 logger = get_logger(__name__)
 
@@ -115,12 +115,16 @@ class ParcelService:
             is_significant=abs(ratio) > AREA_DISCREPANCY_THRESHOLD,
         )
 
-    async def geometry_wgs84(self, parcel: Parcel) -> BaseGeometry:
-        """Shapely geometry in WGS84 — what the WMS and NDVI clients need."""
-        geojson = await self.repository.geometry_as_geojson(parcel.id)
+    async def geometry_in(self, parcel: Parcel, srid: int) -> BaseGeometry:
+        """Geometría de la parcela en el SRID pedido, como objeto shapely."""
+        geojson = await self.repository.geometry_as_geojson(parcel.id, srid)
         if not geojson:
             raise ParcelUnavailable(f"La parcela {parcel.refcat} no tiene geometría almacenada")
         return shape(json.loads(geojson))
+
+    async def geometry_wgs84(self, parcel: Parcel) -> BaseGeometry:
+        """Shapely geometry in WGS84 — lo que esperan los WMS y Copernicus."""
+        return await self.geometry_in(parcel, SRID_WGS84)
 
     @staticmethod
     def _is_fresh(parcel: Parcel) -> bool:

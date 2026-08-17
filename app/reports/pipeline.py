@@ -63,7 +63,7 @@ async def build_payload(session: AsyncSession, report: Report) -> tuple[dict, in
     collected.extend(interpret.layer_findings(hits))
     if built := interpret.built_area_finding(parcel.built_area_m2, bool(orthophotos)):
         collected.append(built)
-    if ndvi_finding := interpret.ndvi_finding(ndvi_series):
+    if ndvi_finding := interpret.ndvi_finding(ndvi_series, parcel.subplots):
         collected.append(ndvi_finding)
     if water := interpret.watercourse_finding(crosses, distance_m, inside_m, watercourse_name):
         collected.append(water)
@@ -154,7 +154,13 @@ def _sources(
     if has_solar:
         sources.append("PVGIS © Unión Europea, 2001-2024 (JRC)")
     if has_ndvi:
-        sources.append("Copernicus Sentinel-2 — datos modificados de Copernicus")
+        # Fórmula canónica del aviso legal de Copernicus: la atribución debe llevar el
+        # año de los datos. El uso comercial está permitido —Reglamento (UE) 377/2014 y
+        # Delegado 1159/2013—, pero atribuir así es condición, no cortesía.
+        sources.append(
+            f"Contiene datos Copernicus Sentinel modificados {datetime.now(UTC):%Y}, "
+            "procesados por informefinca.es"
+        )
     if has_water:
         sources.append("Hidrografía INSPIRE © Instituto Geográfico Nacional de España (CC BY 4.0)")
     sources.extend(sorted({hit.source for hit in hits}))

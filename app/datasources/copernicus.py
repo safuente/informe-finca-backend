@@ -11,6 +11,7 @@ still generated, minus this section.
 
 from dataclasses import dataclass
 from datetime import date
+from math import cos, radians
 
 from shapely.geometry.base import BaseGeometry
 
@@ -25,12 +26,53 @@ TOKEN_URL = (
 )
 STATISTICS_URL = "https://sh.dataspace.copernicus.eu/api/v1/statistics"
 
+# Resolución nativa de Sentinel-2. Se traduce a grados según la latitud de la parcela: un
+# grado de latitud son ~111,3 km en cualquier sitio, pero uno de longitud se encoge con el
+# coseno de la latitud, y España va de los 27° de Canarias a los 43,8° del Cantábrico.
+TARGET_RESOLUTION_M = 10
+METRES_PER_DEGREE_LAT = 111_320
+
+
+def _degree_resolution(geometry: BaseGeometry) -> tuple[float, float]:
+    latitude = geometry.centroid.y
+    resy = TARGET_RESOLUTION_M / METRES_PER_DEGREE_LAT
+    resx = TARGET_RESOLUTION_M / (METRES_PER_DEGREE_LAT * max(cos(radians(latitude)), 0.1))
+    return resx, resy
+
+
 EVALSCRIPT_NDVI = """//VERSION=3
 function setup() { return { input: [{bands:["B04","B08","dataMask"]}],
   output: [{id:"ndvi", bands:1}, {id:"dataMask", bands:1}] }; }
 function evaluatePixel(s) {
   return { ndvi: [(s.B08-s.B04)/(s.B08+s.B04)], dataMask: [s.dataMask] }; }
 """
+
+
+# Un solo aviso por proceso: si CDSE está caído, cada informe fallaría igual y no tiene
+# sentido inundar el correo de operaciones con el mismo problema.
+_alerted = False
+
+
+def _alert_ops(exc: Exception) -> None:
+    global _alerted
+    if _alerted:
+        return
+    _alerted = True
+
+    from app.core.mailer import send_email
+
+    send_email(
+        settings.mail_from,
+        "[ACCIÓN] Copernicus NDVI configurado pero fallando",
+        (
+            "Las credenciales de CDSE están configuradas, pero la consulta de NDVI está "
+            "fallando, así que los informes salen sin la serie de vegetación.\n\n"
+            f"Error: {type(exc).__name__}: {exc}\n\n"
+            "Causas habituales: cuota mensual agotada (10.000 processing units), cliente "
+            "OAuth revocado o caducado, o el servicio de Copernicus caído.\n"
+            "Panel: https://shapps.dataspace.copernicus.eu/dashboard/\n"
+        ),
+    )
 
 
 @dataclass(slots=True)
@@ -40,13 +82,21 @@ class NdviPoint:
 
 
 async def fetch_ndvi_series(geometry: BaseGeometry, years: int | None = None) -> list[NdviPoint]:
-    """Monthly mean NDVI over the parcel. Empty list when CDSE is not configured."""
+    """Monthly mean NDVI over the parcel. Empty list when CDSE is not configured.
+
+    La geometría va en EPSG:4326 y la resolución **en grados**, no en metros. Sentinel Hub
+    interpreta `resx`/`resy` en las unidades del CRS recibido, así que pedir "10" con la
+    geometría en grados significaba 10 grados por píxel y la API respondía 400. Mandarla en
+    EPSG:25830 para poder pedir metros tampoco vale: esta colección no acepta ese CRS y
+    devuelve 500. La salida es quedarse en grados y convertir la resolución.
+    """
     if not settings.ndvi_enabled:
         logger.info("NDVI skipped: CDSE credentials not configured")
         return []
 
     years = years or settings.ndvi_years
     today = date.today()
+    resx, resy = _degree_resolution(geometry)
 
     async with http_client(timeout=120.0) as client:
         try:
@@ -84,16 +134,22 @@ async def fetch_ndvi_series(geometry: BaseGeometry, years: int | None = None) ->
                         },
                         "aggregationInterval": {"of": "P1M"},
                         "evalscript": EVALSCRIPT_NDVI,
-                        "resx": 10,
-                        "resy": 10,
+                        "resx": resx,
+                        "resy": resy,
                     },
                     "calculations": {"ndvi": {}},
                 },
             )
             stats_response.raise_for_status()
             payload = stats_response.json()
-        except Exception:  # noqa: BLE001 — NDVI is a nice-to-have, never a blocker
+        except Exception as exc:  # noqa: BLE001 — NDVI is a nice-to-have, never a blocker
+            # Configurado y fallando no es lo mismo que no configurado. Lo primero
+            # significa que estamos vendiendo informes sin una sección que anunciamos, y
+            # como el informe degrada con elegancia nadie se enteraría: el log se lo
+            # traga. Igual que con un pago que no se puede atender, alguien tiene que
+            # recibir el aviso.
             logger.warning("Copernicus NDVI unavailable", exc_info=True)
+            _alert_ops(exc)
             return []
 
     series: list[NdviPoint] = []

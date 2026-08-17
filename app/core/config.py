@@ -41,7 +41,7 @@ class Settings(BaseSettings):
     smtp_user: str = ""
     smtp_password: str = ""
     smtp_starttls: bool = True
-    mail_from: str = "hola@informefinca.es"
+    mail_from: str = "contacto@informefinca.es"
     mail_from_name: str = "informefinca.es"
 
     preview_rate_limit: int = 20

@@ -118,15 +118,20 @@ class ParcelRepository(BaseRepository[Parcel]):
         row = result.one()
         return float(row.inside or 0.0), (float(row.distance) if row.distance is not None else None)
 
-    async def geometry_as_geojson(self, parcel_id: int) -> str | None:
-        """Parcel geometry back in WGS84, for the WMS/NDVI calls that expect lon/lat."""
+    async def geometry_as_geojson(self, parcel_id: int, srid: int = SRID_WGS84) -> str | None:
+        """Geometría de la parcela en el SRID pedido.
+
+        Por defecto WGS84, que es lo que esperan los WMS. Pero algunos servicios miden la
+        resolución en las unidades del CRS que les mandas, y ahí hay que darles metros:
+        pedir 10 "de resolución" con la geometría en grados significa 10 grados por píxel.
+        """
         result = await self.db.execute(
+            # El cast explícito es necesario: asyncpg no puede inferir el tipo del
+            # parámetro dentro de ST_Transform y lo manda como texto.
             text(
-                f"""
-                SELECT ST_AsGeoJSON(ST_Transform(geom, {SRID_WGS84}))
-                FROM parcels WHERE id = :parcel_id
-                """
+                "SELECT ST_AsGeoJSON(ST_Transform(geom, CAST(:srid AS integer))) "
+                "FROM parcels WHERE id = :pid"
             ),
-            {"parcel_id": parcel_id},
+            {"pid": parcel_id, "srid": srid},
         )
         return result.scalar()

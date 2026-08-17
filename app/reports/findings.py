@@ -28,6 +28,28 @@ PNOA_SOURCE = "PNOA · IGN"
 NDVI_ACTIVE = 0.45
 NDVI_BARE = 0.25
 
+# Cultivos del Catastro sobre los que el NDVI *no* discrimina. En monte o matorral la
+# vegetación está ahí todo el año: un NDVI alto significa "hay matorral", que es justo lo
+# que ya declara la ficha catastral. El dato que sí vale en una finca de labor —hay ciclo
+# de cultivo o se ha perdido— aquí no existe, porque no hay ciclo que perder.
+PERMANENT_COVER_HINTS = (
+    "monte",
+    "matorral",
+    "forestal",
+    "pinar",
+    "encinar",
+    "robledal",
+    "arbolado",
+    "improductivo",
+    "erial",
+)
+
+
+def has_permanent_cover(subplots: list[dict] | None) -> bool:
+    """¿Lo que declara el Catastro es cubierta permanente y no cultivo?"""
+    crops = " ".join((item.get("crop") or "") for item in (subplots or [])).lower()
+    return any(hint in crops for hint in PERMANENT_COVER_HINTS)
+
 
 @dataclass(slots=True)
 class Dictamen:
@@ -360,8 +382,15 @@ def _is_blocking(hit: LayerHit) -> bool:
     return hit.layer_code == "snczi_zfp" or hit.kind is LayerKind.PUBLIC_DOMAIN
 
 
-def ndvi_finding(series: list[dict]) -> Finding | None:
-    """Vegetation activity over time. The most useful signal and the easiest to misread."""
+def ndvi_finding(series: list[dict], subplots: list[dict] | None = None) -> Finding | None:
+    """Vegetation activity over time. The most useful signal and the easiest to misread.
+
+    El mismo número significa cosas distintas según lo que haya en el suelo. En una finca
+    de labor, el ciclo estacional es la firma de que alguien la trabaja, y su desaparición
+    es un hallazgo que vale dinero. En monte bajo no hay ciclo que perder: la señal alta
+    solo dice que hay matorral, que es lo que ya declara el Catastro. Por eso, sobre
+    cubierta permanente, el NDVI se queda en contexto y no afirma uso agrícola.
+    """
     if len(series) < 12:
         return None
 
@@ -369,6 +398,21 @@ def ndvi_finding(series: list[dict]) -> Finding | None:
     mean = sum(last_year) / len(last_year)
     span = f"{series[0]['month']} → {series[-1]['month']}"
     mean_text = f"{mean:.2f}".replace(".", ",")
+
+    if has_permanent_cover(subplots):
+        return Finding(
+            severity=Severity.CONFORME,
+            title="Cubierta vegetal permanente, coherente con lo declarado",
+            detail=(
+                f"NDVI medio de {mean_text} en los últimos doce meses (serie {span}), sin "
+                "ciclo estacional de cultivo. Es lo esperable en el aprovechamiento que "
+                "declara el Catastro para esta parcela: la vegetación permanece todo el "
+                "año, así que el índice confirma que hay cubierta vegetal pero no permite "
+                "deducir uso agrícola ni su intensidad."
+            ),
+            source=SENTINEL_SOURCE,
+            confidence=Confidence.MEDIA,
+        )
 
     if mean > NDVI_ACTIVE:
         return Finding(

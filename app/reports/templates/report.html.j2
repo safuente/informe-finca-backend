@@ -201,7 +201,7 @@ footer{font-size:.7rem;color:var(--mut);margin-top:20px;line-height:1.7}
   <div class="timeline">
     {% for image in orthophotos %}
     <figure>
-      <img src="data:image/png;base64,{{ image.png_base64 }}" alt="{{ image.title }}">
+      <img src="data:image/jpeg;base64,{{ image.png_base64 }}" alt="{{ image.title }}">
       <figcaption><b>{{ image.title }}.</b></figcaption>
     </figure>
     {% endfor %}
