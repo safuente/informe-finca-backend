@@ -87,6 +87,11 @@ class LayerSpec:
     # promete no se lea como "sin afección"; disculparse por lo que nunca se ofreció solo
     # llena de ruido un documento que se vende por su criterio.
     optional: bool = False
+    # Qué significa la sigla, en una línea. El informe lo imprime bajo el nombre de la
+    # capa: quien compra una finca no tiene por qué saber qué es una ZEPA, y una tabla
+    # llena de acrónimos sin desarrollar obliga a buscarlos fuera del documento que ha
+    # pagado. Vacío en las capas cuyo nombre ya se explica solo.
+    meaning: str = ""
     download: LayerDownload | None = None
 
 
@@ -96,6 +101,10 @@ CATALOG: tuple[LayerSpec, ...] = (
         label="Zona de Flujo Preferente (ZFP)",
         kind=LayerKind.FLOOD,
         source="SNCZI · MITECO",
+        meaning=(
+            "Franja por la que circularía la mayor parte del caudal en una crecida de 100 años. Es "
+            "la única lámina en la que no se permite edificar."
+        ),
         report_nearest=True,
         download=LayerDownload(
             filename="laminas-zfp-PB.zip",
@@ -117,6 +126,7 @@ CATALOG: tuple[LayerSpec, ...] = (
         label="Zona inundable T=10 años",
         kind=LayerKind.FLOOD,
         source="SNCZI · MITECO",
+        meaning=("Superficie que la crecida cubre, en promedio, una vez cada 10 años."),
         # Sí interesa la distancia: una lámina a 300 m es información material para quien
         # compra, y sin esto la capa desaparecía del informe cuando no había intersección
         # —el silencio se leía como "aquí no hay agua"—.
@@ -138,6 +148,7 @@ CATALOG: tuple[LayerSpec, ...] = (
         label="Zona inundable T=100 años",
         kind=LayerKind.FLOOD,
         source="SNCZI · MITECO",
+        meaning=("Superficie que la crecida cubre, en promedio, una vez cada 100 años."),
         report_nearest=True,
         download=LayerDownload(
             filename="laminasPB-q100.zip",
@@ -153,6 +164,7 @@ CATALOG: tuple[LayerSpec, ...] = (
         label="Zona inundable T=500 años",
         kind=LayerKind.FLOOD,
         source="SNCZI · MITECO",
+        meaning=("Superficie que la crecida cubre, en promedio, una vez cada 500 años."),
         report_nearest=True,
         download=LayerDownload(
             filename="laminasPB-q500.zip",
@@ -213,6 +225,10 @@ CATALOG: tuple[LayerSpec, ...] = (
         label="Red Natura 2000 · ZEPA",
         kind=LayerKind.PROTECTED,
         source="Banco de Datos de la Naturaleza · MITECO",
+        meaning=(
+            "Zona de Especial Protección para las Aves (Directiva Aves): protege hábitats de cría, "
+            "invernada y descanso de aves silvestres."
+        ),
         report_nearest=True,
         download=LayerDownload(
             filename="rn2000_shp.zip",
@@ -231,6 +247,11 @@ CATALOG: tuple[LayerSpec, ...] = (
         label="Red Natura 2000 · ZEC/LIC",
         kind=LayerKind.PROTECTED,
         source="Banco de Datos de la Naturaleza · MITECO",
+        meaning=(
+            "Zona Especial de Conservación / Lugar de Importancia Comunitaria (Directiva "
+            "Hábitats): protege tipos de hábitat y especies que no son aves. LIC es la fase "
+            "previa a ZEC, ya con los mismos efectos."
+        ),
         report_nearest=True,
         download=LayerDownload(
             filename="rn2000_shp.zip",
@@ -246,6 +267,10 @@ CATALOG: tuple[LayerSpec, ...] = (
         label="Espacio Natural Protegido",
         kind=LayerKind.PROTECTED,
         source="Banco de Datos de la Naturaleza · MITECO",
+        meaning=(
+            "Espacio Natural Protegido declarado por el Estado o la comunidad autónoma (parque, "
+            "reserva, monumento natural o paisaje protegido)."
+        ),
         report_nearest=True,
         download=LayerDownload(
             filename="enp_shp.zip",
@@ -260,6 +285,10 @@ CATALOG: tuple[LayerSpec, ...] = (
         label="Monte de Utilidad Pública",
         kind=LayerKind.PUBLIC_DOMAIN,
         source="Inventario Español de Patrimonios Forestales · MITECO",
+        meaning=(
+            "Monte de Utilidad Pública: monte de titularidad pública catalogado, gestionado por la "
+            "comunidad autónoma e inalienable, imprescriptible e inembargable."
+        ),
         report_nearest=True,
         download=LayerDownload(
             filename="iepf_cmup_shp.zip",
@@ -282,6 +311,10 @@ CATALOG: tuple[LayerSpec, ...] = (
         label="Vía pecuaria",
         kind=LayerKind.PUBLIC_DOMAIN,
         source="Red General de Vías Pecuarias · MITECO",
+        meaning=(
+            "Ruta histórica de trashumancia. Es dominio público: no se puede adquirir por el paso "
+            "del tiempo ni cerrar."
+        ),
         geometry=GeometryKind.LINE,
         report_nearest=True,
         download=LayerDownload(

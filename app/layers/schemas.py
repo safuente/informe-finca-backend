@@ -8,6 +8,8 @@ class LayerHit(BaseModel):
 
     layer_code: str
     label: str
+    # Qué significa la sigla; lo pone el catálogo, no la consulta.
+    meaning: str = ""
     kind: LayerKind
     source: str
     geometry: GeometryKind = GeometryKind.AREA

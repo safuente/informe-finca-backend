@@ -78,6 +78,9 @@ figcaption b{color:var(--ink)}
 .timeline figure:not(:nth-child(3n+1)){margin-left:2%}
 .note{font-size:.82rem;background:var(--soft);border-radius:6px;padding:11px 14px;margin-top:12px}
 .src{font:400 .68rem/1.5 "DejaVu Sans Mono",monospace;color:var(--mut);margin-top:8px}
+/* Qué es cada sigla, bajo el nombre de la capa: quien compra no tiene por qué saber
+   qué es una ZEPA, y buscarlo fuera del informe es trabajo que ya ha pagado. */
+.meaning{display:block;font-weight:400;font-size:.72rem;line-height:1.45;color:var(--mut);margin-top:3px}
 ol.rec{margin:10px 0 0 1.1rem} ol.rec li{margin:.5rem 0;font-size:.86rem}
 ul.caveats{margin:10px 0 0 1.1rem;font-size:.82rem;color:var(--amber)}
 footer{font-size:.7rem;color:var(--mut);margin-top:20px;line-height:1.7}
@@ -223,7 +226,7 @@ footer{font-size:.7rem;color:var(--mut);margin-top:20px;line-height:1.7}
     <tr><th style="width:210px">Afección</th><th>Resultado</th><th style="width:130px">Estado</th></tr>
     {% for layer in layers %}
     <tr>
-      <td>{{ layer.label }}</td>
+      <td>{{ layer.label }}{% if layer.meaning %}<span class="meaning">{{ layer.meaning }}</span>{% endif %}</td>
       <td>
         {% if layer.intersects and layer.geometry == 'line' %}
           El eje discurre {{ layer.length_m | es_number }} m dentro de la parcela{% if layer.feature_names %}: {{ layer.feature_names | join(', ') }}{% endif %}. Anchura legal a verificar en el acto de clasificación.
@@ -231,7 +234,7 @@ footer{font-size:.7rem;color:var(--mut);margin-top:20px;line-height:1.7}
           Intersección de {{ layer.area_m2 | es_number }} m² ({{ layer.area_ratio | es_percent }} de la parcela){% if layer.feature_names %}: {{ layer.feature_names | join(', ') }}{% endif %}.
         {% else %}
           Sin intersección en la cartografía oficial consultada.{% if layer.nearest_name %}
-          Elemento más próximo: «{{ layer.nearest_name }}», a {{ (layer.nearest_distance_m / 1000) | es_number(1) }} km.{% endif %}
+          Elemento más próximo: {{ layer.nearest_name | es_name }}, a {{ (layer.nearest_distance_m / 1000) | es_number(1) }} km.{% endif %}
         {% endif %}
       </td>
       <td>

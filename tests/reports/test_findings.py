@@ -115,6 +115,100 @@ def test_preferential_flow_zone_outranks_a_return_period():
     assert t500.severity is Severity.AFECCION
 
 
+def period(code: str, *, ratio: float = 0.0, area_m2: float = 0.0, distance_m: float | None = None):
+    return LayerHit(
+        layer_code=code,
+        label=f"Zona inundable {code[-4:]}",
+        kind=LayerKind.FLOOD,
+        source="SNCZI · MITECO",
+        intersects=distance_m is None,
+        area_m2=area_m2,
+        area_ratio=ratio,
+        nearest_name="Río Turienzo",
+        nearest_distance_m=distance_m,
+    )
+
+
+def test_the_three_return_periods_produce_a_single_finding():
+    """Tres párrafos que se diferencian en un metro se dejan de leer.
+
+    Es el mismo fenómeno medido con tres probabilidades: va en un hallazgo, no en tres.
+    """
+    findings = interpret.layer_findings(
+        [
+            period("snczi_t10", distance_m=285.0),
+            period("snczi_t100", distance_m=284.0),
+            period("snczi_t500", distance_m=284.0),
+        ]
+    )
+    assert len(findings) == 1
+    assert "284 m" in findings[0].detail
+    assert "Río Turienzo" in findings[0].detail
+
+
+def test_grouping_keeps_the_distinction_that_costs_money():
+    """Estar dentro de la lámina de diez años no es rozar la de quinientos."""
+    decenal = interpret.layer_findings(
+        [
+            period("snczi_t10", ratio=0.31, area_m2=5_600),
+            period("snczi_t100", ratio=0.44, area_m2=7_900),
+            period("snczi_t500", ratio=0.52, area_m2=9_400),
+        ]
+    )[0]
+    assert decenal.severity is Severity.INCIDENCIA
+    assert "T=10" in decenal.detail and "T=500" in decenal.detail
+    assert "una vez cada década" in decenal.detail
+
+    excepcional = interpret.layer_findings(
+        [
+            period("snczi_t10", distance_m=120.0),
+            period("snczi_t100", distance_m=40.0),
+            period("snczi_t500", ratio=0.06, area_m2=1_100),
+        ]
+    )[0]
+    assert excepcional.severity is Severity.AFECCION
+    assert "T=500" in excepcional.detail
+    assert "T=10" not in excepcional.detail  # no se le atribuye una lámina que no la toca
+
+
+def test_grouped_flood_areas_use_spanish_separators():
+    """El punto de los miles y la coma del decimal no pueden intercambiarse."""
+    finding = interpret.layer_findings([period("snczi_t500", ratio=0.155, area_m2=9_400)])[0]
+    assert "9.400 m²" in finding.detail
+    assert "15,5%" in finding.detail
+
+
+def test_a_distant_flow_zone_joins_the_group_instead_of_repeating_it():
+    """Sin intersección las cuatro láminas dicen lo mismo, con dos metros de diferencia."""
+    findings = interpret.layer_findings(
+        [
+            period("snczi_t10", distance_m=285.0),
+            period("snczi_t100", distance_m=284.0),
+            period("snczi_t500", distance_m=284.0),
+            period("snczi_zfp", distance_m=286.0),
+        ]
+    )
+    assert len(findings) == 1
+    assert "flujo preferente" in findings[0].detail
+    assert "T=10, T=100, T=500" in findings[0].detail  # ninguna se da por mirada en silencio
+    assert "284 m" in findings[0].detail
+
+
+def test_the_preferential_flow_zone_stays_on_its_own():
+    """La ZFP es la única lámina que bloquea por sí sola: no se diluye en el grupo."""
+    findings = interpret.layer_findings(
+        [
+            flood_hit("snczi_zfp", 0.04),
+            period("snczi_t10", ratio=0.12, area_m2=2_100),
+            period("snczi_t100", ratio=0.20, area_m2=3_500),
+            period("snczi_t500", ratio=0.28, area_m2=4_900),
+        ]
+    )
+    assert len(findings) == 2
+    zfp = next(f for f in findings if "inundable cartografiada" not in f.title)
+    assert zfp.severity is Severity.INCIDENCIA
+
+
 def test_line_layer_reports_length_and_refuses_to_invent_a_width():
     """Vías pecuarias are published as axes; the legal strip is not in the data."""
     hit = LayerHit(
@@ -248,3 +342,79 @@ def test_a_pond_far_away_produces_no_finding():
 
 def test_no_water_body_data_produces_no_finding():
     assert interpret.water_body_finding(0.0, None, None) is None
+
+
+def test_solar_without_area_gives_only_the_yield():
+    """Sin superficie no se inventa potencia: solo se dice lo que rinde el sitio."""
+    finding = interpret.solar_finding(1680.0)
+    assert "1.680 kWh por cada kWp" in finding.detail
+    assert "cabrían" not in finding.detail
+    assert finding.confidence is Confidence.ALTA
+
+
+def test_solar_with_area_estimates_power_as_a_range():
+    finding = interpret.solar_finding(1680.0, area_m2=7193.0)
+    # 7.193 m² entre 25 y 15 m²/kWp
+    assert "288" in finding.detail and "480" in finding.detail
+    assert "MWh al año" in finding.detail
+    # Es una inferencia nuestra sobre la superficie, no un dato oficial.
+    assert finding.confidence is Confidence.MEDIA
+    # El ratio se declara para que cualquiera pueda rehacer la cuenta.
+    assert "15 a 25 m²" in finding.detail
+
+
+def test_solar_never_estimates_payback():
+    """Amortización y coste dependen del nudo de evacuación y del precio de venta."""
+    finding = interpret.solar_finding(1680.0, area_m2=7193.0)
+    assert "No se estima plazo de amortización" in finding.detail
+    for palabra in ("años de amortización", "€/kWh", "coste de instalación"):
+        assert palabra not in finding.detail
+
+
+def test_solar_names_what_blocks_the_project():
+    monte = [{"crop": "MONTE BAJO", "intensity": "07", "area_m2": 7193.0}]
+    finding = interpret.solar_finding(1680.0, area_m2=7193.0, subplots=monte, near_protected=True)
+    assert "cambio de uso" in finding.detail
+    assert "evaluación ambiental" in finding.detail
+
+
+def test_an_intersecting_flow_zone_is_never_folded_into_the_group():
+    """Si la ZFP toca la parcela es el hallazgo que bloquea: no se cuenta con las demás."""
+    findings = interpret.layer_findings(
+        [
+            flood_hit("snczi_zfp", 0.04),
+            period("snczi_t10", distance_m=900.0),
+            period("snczi_t100", distance_m=880.0),
+            period("snczi_t500", distance_m=880.0),
+        ]
+    )
+    assert len(findings) == 2
+    zfp = next(f for f in findings if "inundable cartografiada" not in f.title)
+    assert zfp.severity is Severity.INCIDENCIA
+    grupo = next(f for f in findings if "inundable" in f.title and f is not zfp)
+    assert "flujo preferente" not in grupo.detail
+
+
+def test_a_feature_with_several_names_does_not_swallow_the_sentence():
+    """El SNCZI encadena todas las denominaciones de una lámina en un solo campo."""
+    hit = period(
+        "snczi_t500",
+        distance_m=1_240.0,
+    )
+    hit.nearest_name = (
+        "Arroyo de Calancha antes de arroyo de la Rehoya; "
+        "Arroyo de Calancha después de arroyo de la Rehoya; Arroyo de la Rehoya"
+    )
+    finding = interpret.layer_findings([hit])[0]
+
+    assert "«Arroyo de Calancha antes de arroyo de la Rehoya» y otras 2 denominaciones" in (
+        finding.detail
+    )
+    # No se recorta en silencio: que hay más nombres se dice.
+    assert "Arroyo de la Rehoya;" not in finding.detail
+
+
+def test_a_single_name_is_left_exactly_as_the_cartography_says_it():
+    finding = interpret.layer_findings([period("snczi_t500", distance_m=1_240.0)])[0]
+    assert "«Río Turienzo»" in finding.detail
+    assert "denominaciones" not in finding.detail

@@ -166,8 +166,11 @@ forma de revisar la plantilla y de regenerar el ejemplo que la web sirve en `/sa
 
 ## Estructura
 
-El modelo de datos —qué contiene cada tabla y de dónde sale cada dato— está en
-[MODELO-DATOS.md](MODELO-DATOS.md).
+Documentación del proyecto:
+
+- [MODELO-DATOS.md](MODELO-DATOS.md) — qué contiene cada tabla y de dónde sale cada dato
+- [PIPELINE-INFORME.md](PIPELINE-INFORME.md) — qué consulta el informe y cómo decide lo que dice
+- [CORREO-Y-DNS.md](CORREO-Y-DNS.md) — entrega por correo: Cloudflare, Maileroo y los registros DNS
 
 ```
 app/

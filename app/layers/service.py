@@ -50,6 +50,7 @@ class LayerService:
             return LayerHit(
                 layer_code=spec.code,
                 label=spec.label,
+                meaning=spec.meaning,
                 kind=spec.kind,
                 source=spec.source,
                 geometry=spec.geometry,
@@ -63,6 +64,7 @@ class LayerService:
         hit = LayerHit(
             layer_code=spec.code,
             label=spec.label,
+            meaning=spec.meaning,
             kind=spec.kind,
             source=spec.source,
             geometry=spec.geometry,

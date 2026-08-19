@@ -167,7 +167,7 @@ Qué genera cada regla:
 | Función | De dónde | Produce |
 |---|---|---|
 | `area_finding` | `parcels` | Declarada vs medida; OBSERVACIÓN si supera el 5 % |
-| `layer_findings` | `layer_features` | Una por capa: intersección o ausencia, con nombre y superficie |
+| `layer_findings` | `layer_features` | Una por capa: intersección o ausencia, con nombre y superficie (salvo inundabilidad, ver abajo) |
 | `built_area_finding` | `parcels.built_area_m2` | Señala la **pregunta**, nunca la respuesta (ver abajo) |
 | `ndvi_finding` | Sentinel-2 | Actividad vegetal del último año, siempre confianza MEDIA |
 | `solar_finding` | PVGIS | Aptitud fotovoltaica, advirtiendo que no implica viabilidad |
@@ -187,6 +187,16 @@ texto lo dice explícitamente.
 
 **Una capa sin cargar es una salvedad, no un «sin afección».** El silencio no es un
 resultado limpio.
+
+**La inundabilidad va en un solo hallazgo.** Las cuatro láminas del SNCZI describen el
+mismo fenómeno con distinta probabilidad, así que emitirlas por separado producía tres o
+cuatro párrafos que se diferenciaban en un metro de distancia y ocupaban medio resumen
+ejecutivo. `_flood_finding` las funde, pero conserva lo que sí cambia el precio: nombra qué
+periodos alcanzan la parcela y con cuánta superficie, y marca INCIDENCIA solo cuando entra
+en la lámina de T=10 —inundación del orden de una vez por década—, frente a AFECCIÓN si
+únicamente la tocan las de 100 o 500 años. La **ZFP se agrupa solo cuando ninguna lámina
+intersecta**: en cuanto toca la parcela vuelve a contarse sola, porque es la única con
+efecto jurídico propio y diluirla entre las demás la escondería.
 
 Los hallazgos se ordenan por severidad (INCIDENCIA → AFECCIÓN → OBSERVACIÓN → CONFORME)
 antes de renderizar, para que el resumen ejecutivo empiece por lo que importa.

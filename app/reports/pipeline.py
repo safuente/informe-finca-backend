@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.logger import get_logger
 from app.datasources import copernicus, ign, ign_hidrografia, pvgis
-from app.layers.catalog import BY_CODE
+from app.layers.catalog import BY_CODE, LayerKind
 from app.layers.repository import LayerRepository
 from app.layers.service import LayerService
 from app.parcels.repository import ParcelRepository
@@ -69,7 +69,19 @@ async def build_payload(session: AsyncSession, report: Report) -> tuple[dict, in
         collected.append(water)
     if pond := interpret.water_body_finding(water_inside_m2, water_distance_m, water_body_name):
         collected.append(pond)
-    if solar_finding := interpret.solar_finding(solar.kwh_per_kwp_year if solar else None):
+    # Un espacio protegido cerca no impide la instalación, pero sí obliga a evaluación
+    # ambiental: es la diferencia entre "aptitud elevada" y "aquí se puede montar".
+    near_protected = any(
+        hit.kind is LayerKind.PROTECTED
+        and (hit.intersects or (hit.nearest_distance_m or 1e9) < 5000)
+        for hit in hits
+    )
+    if solar_finding := interpret.solar_finding(
+        solar.kwh_per_kwp_year if solar else None,
+        area_m2=reference_area,
+        subplots=parcel.subplots,
+        near_protected=near_protected,
+    ):
         collected.append(solar_finding)
 
     collected.sort(key=lambda finding: _SEVERITY_ORDER.index(finding.severity))

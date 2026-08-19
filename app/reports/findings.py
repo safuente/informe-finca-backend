@@ -276,14 +276,138 @@ def water_body_finding(
     return None
 
 
+# Los tres periodos de retorno son el mismo fenómeno en distinta intensidad, así que van
+# en un solo hallazgo: tres párrafos que se diferencian en un metro ocupan media página del
+# resumen ejecutivo y hacen que el lector deje de leer los que sí importan. La ZFP no entra
+# aquí — es la única lámina con efecto jurídico propio, y por eso se cuenta aparte.
+RETURN_PERIOD_LAYERS = ("snczi_t10", "snczi_t100", "snczi_t500")
+RETURN_PERIOD_LABELS = {"snczi_t10": "T=10", "snczi_t100": "T=100", "snczi_t500": "T=500"}
+ZFP_LAYER = "snczi_zfp"
+FLOOD_LAYERS = (*RETURN_PERIOD_LAYERS, ZFP_LAYER)
+
+
 def layer_findings(hits: list[LayerHit]) -> list[Finding]:
     findings: list[Finding] = []
+    floods = [hit for hit in hits if hit.layer_code in FLOOD_LAYERS]
+    group = [hit for hit in floods if hit.layer_code in RETURN_PERIOD_LAYERS]
+
+    # La ZFP se agrupa con los periodos de retorno solo cuando ninguna lámina toca la
+    # parcela: ahí las cuatro dicen lo mismo —«el agua queda cerca pero fuera»— y separarlas
+    # produce dos párrafos que se diferencian en dos metros. En cuanto una intersecta,
+    # vuelve a contarse sola: es la única con efecto jurídico propio y no puede diluirse.
+    zfp = next((hit for hit in floods if hit.layer_code == ZFP_LAYER), None)
+    if zfp is not None and not any(hit.intersects for hit in floods):
+        group.append(zfp)
+
+    grouped = {hit.layer_code for hit in group}
     for hit in hits:
+        if hit.layer_code in grouped:
+            continue
         if hit.intersects:
             findings.append(_intersection_finding(hit))
         elif hit.kind is LayerKind.PROTECTED or hit.nearest_distance_m is not None:
             findings.append(_clear_finding(hit))
+
+    if group and (merged := _flood_finding(group)):
+        findings.append(merged)
     return findings
+
+
+def _flood_finding(periods: list[LayerHit]) -> Finding | None:
+    """Las tres láminas de inundabilidad, en un solo hallazgo.
+
+    Lo que no puede perderse al agrupar es la gradación: que la parcela esté dentro de la
+    lámina de diez años —se inunda cada década— no es comparable a rozar la de quinientos.
+    Por eso el texto nombra qué periodos la tocan y con cuánta superficie, y la severidad
+    la marca el más frecuente de ellos.
+    """
+    touching = [hit for hit in periods if hit.intersects]
+
+    if touching:
+        detalle = ", ".join(
+            f"{RETURN_PERIOD_LABELS[hit.layer_code]} con {_es(hit.area_m2)} m² "
+            f"({_pct(hit.area_ratio)})"
+            for hit in sorted(touching, key=lambda h: RETURN_PERIOD_LAYERS.index(h.layer_code))
+        )
+        names = sorted({hit.nearest_name or "" for hit in touching if hit.nearest_name})
+        cauce = f" El cauce asociado es {named_feature(names[0])}." if names else ""
+        # La lámina más frecuente que toca la parcela manda: T=10 significa que se inunda
+        # del orden de una vez cada diez años.
+        frequent = min(touching, key=lambda h: RETURN_PERIOD_LAYERS.index(h.layer_code))
+        muy_frecuente = frequent.layer_code == "snczi_t10"
+        return Finding(
+            severity=Severity.INCIDENCIA if muy_frecuente else Severity.AFECCION,
+            title="La parcela entra en zona inundable cartografiada",
+            detail=(
+                f"Intersección con la cartografía oficial de inundabilidad: {detalle}.{cauce} "
+                + (
+                    "La lámina de periodo de retorno 10 años implica una probabilidad alta de "
+                    "inundación —del orden de una vez cada década—, lo que condiciona "
+                    "seriamente la edificabilidad y cualquier instalación fija. "
+                    if muy_frecuente
+                    else "Condiciona la edificabilidad y exige autorización del organismo de "
+                    "cuenca sobre la superficie afectada. "
+                )
+                + "Las obras en esa superficie requieren informe del organismo de cuenca."
+            ),
+            source=periods[0].source,
+            confidence=Confidence.ALTA,
+        )
+
+    distances = [h.nearest_distance_m for h in periods if h.nearest_distance_m is not None]
+    if not distances:
+        return None
+
+    nearest = min(distances)
+    names = [h.nearest_name for h in periods if h.nearest_name and h.nearest_distance_m == nearest]
+    cauce = f", {named_feature(names[0])}," if names else ""
+    medida = (
+        f"{_es(nearest)} m" if nearest < 1000 else f"{nearest / 1000:,.1f} km".replace(".", ",")
+    )
+    laminas = _flood_layer_names(periods)
+
+    if nearest < FLOOD_PROXIMITY_M:
+        return Finding(
+            severity=Severity.OBSERVACION,
+            title=f"Fuera de zona inundable, pero a menos de {FLOOD_PROXIMITY_M} m",
+            detail=(
+                f"La parcela queda fuera de {laminas}. La más próxima{cauce} está a "
+                f"{medida}. El límite de la lámina no es una frontera física y la "
+                "cartografía solo cubre los tramos estudiados, así que a esta distancia "
+                "conviene comprobar la cota concreta de la parcela antes de proyectar "
+                "edificación o instalaciones fijas."
+            ),
+            source=periods[0].source,
+            confidence=Confidence.ALTA,
+        )
+
+    return Finding(
+        severity=Severity.CONFORME,
+        title="Fuera de las zonas inundables cartografiadas",
+        detail=f"La parcela queda fuera de {laminas}. La más próxima{cauce} está a {medida}.",
+        source=periods[0].source,
+        confidence=Confidence.ALTA,
+    )
+
+
+def _flood_layer_names(group: list[LayerHit]) -> str:
+    """Qué láminas cubre el hallazgo agrupado, dichas por su nombre.
+
+    Importa nombrarlas: «fuera de zona inundable» a secas deja al lector sin saber si se ha
+    mirado la de quinientos años o solo la decenal.
+    """
+    periodos = ", ".join(
+        RETURN_PERIOD_LABELS[hit.layer_code]
+        for hit in sorted(
+            (h for h in group if h.layer_code in RETURN_PERIOD_LABELS),
+            key=lambda h: RETURN_PERIOD_LAYERS.index(h.layer_code),
+        )
+    )
+    laminas = f"las láminas de inundabilidad ({periodos})" if periodos else ""
+    if any(hit.layer_code == ZFP_LAYER for hit in group):
+        zfp = "la zona de flujo preferente"
+        return f"{laminas} y de {zfp}" if laminas else f"{zfp}"
+    return laminas
 
 
 def _intersection_finding(hit: LayerHit) -> Finding:
@@ -349,7 +473,7 @@ def _clear_finding(hit: LayerHit) -> Finding:
             measure = f"{distance:,.0f} m".replace(",", ".")
         else:
             measure = f"{distance / 1000:,.1f} km".replace(".", ",")
-        proximity = f" {noun}, «{hit.nearest_name}», está a {measure}."
+        proximity = f" {noun}, {named_feature(hit.nearest_name)}, está a {measure}."
     else:
         proximity = ""
 
@@ -453,23 +577,114 @@ def ndvi_finding(series: list[dict], subplots: list[dict] | None = None) -> Find
     )
 
 
-def solar_finding(kwh_per_kwp_year: float | None) -> Finding | None:
+# Ocupación de una instalación fotovoltaica fija sobre suelo, contando separación entre
+# filas, viales y retranqueos. El rango es real y ancho: depende del diseño, y dar un
+# número único fingiría una precisión que no existe. Se declara en el texto para que
+# cualquiera pueda rehacer la cuenta o discutirla.
+M2_PER_KWP_DENSE = 15
+M2_PER_KWP_SPARSE = 25
+
+# Por encima de esto, un promotor fotovoltaico se interesa por el emplazamiento.
+DEVELOPER_THRESHOLD = 1600
+
+# Cultivos declarados que obligan a cambio de uso antes de cualquier proyecto: la aptitud
+# física no sirve de nada si el suelo no admite la instalación.
+RESTRICTED_USE_HINTS = PERMANENT_COVER_HINTS
+
+
+def _es(value: float) -> str:
+    """Número con separador de miles español."""
+    return f"{value:,.0f}".replace(",", ".")
+
+
+def _pct(ratio: float) -> str:
+    """Porcentaje con coma decimal."""
+    return f"{ratio:.1%}".replace(".", ",")
+
+
+def named_feature(name: str) -> str:
+    """El nombre de un elemento, entrecomillado y listo para meter en una frase.
+
+    El SNCZI encadena en un solo campo todas las denominaciones que recorre una misma
+    lámina —«Arroyo de Calancha antes de arroyo de la Rehoya; Arroyo de Calancha después
+    de…»—, y lo mismo hacen algunos montes de utilidad pública. Volcarlas enteras en mitad
+    de una frase la vuelve ilegible; cortar por la primera y callar sería esconder que el
+    elemento tiene más nombres. Se dice la primera y cuántas quedan.
+    """
+    parts = [part.strip() for part in name.split(";") if part.strip()]
+    if len(parts) <= 1:
+        return f"«{name.strip()}»"
+    resto = "otra denominación" if len(parts) == 2 else f"otras {len(parts) - 1} denominaciones"
+    return f"«{parts[0]}» y {resto}"
+
+
+def solar_finding(
+    kwh_per_kwp_year: float | None,
+    area_m2: float | None = None,
+    subplots: list[dict] | None = None,
+    near_protected: bool = False,
+) -> Finding | None:
+    """Qué rinde el sitio y, si se sabe la superficie, qué cabría en él.
+
+    La potencia se estima; la amortización no. Estimar cuántos kWp entran en una parcela
+    es geometría y se puede declarar. Calcular en cuántos años se recupera la inversión
+    exige el coste de conexión al nudo de evacuación y el precio de venta de la energía,
+    que son justo las dos variables que deciden el resultado y que no conocemos. Ponerles
+    un número sería convertir dos suposiciones en una promesa.
+    """
     if not kwh_per_kwp_year:
         return None
+
     level = (
-        "elevada" if kwh_per_kwp_year > 1600 else "buena" if kwh_per_kwp_year > 1400 else "moderada"
+        "elevada"
+        if kwh_per_kwp_year > DEVELOPER_THRESHOLD
+        else "buena"
+        if kwh_per_kwp_year > 1400
+        else "moderada"
     )
-    value = f"{kwh_per_kwp_year:,.0f}".replace(",", ".")
+    yield_text = _es(kwh_per_kwp_year)
+    threshold = _es(DEVELOPER_THRESHOLD)
+
+    detail = f"El emplazamiento rinde {yield_text} kWh por cada kWp instalado y año, " + (
+        f"por encima del umbral que suelen buscar los promotores (≈{threshold})."
+        if kwh_per_kwp_year > DEVELOPER_THRESHOLD
+        else f"por debajo del umbral habitual de los promotores (≈{threshold})."
+    )
+
+    if area_m2 and area_m2 > 0:
+        low = area_m2 / M2_PER_KWP_SPARSE
+        high = area_m2 / M2_PER_KWP_DENSE
+        detail += (
+            f" Sobre los {_es(area_m2)} m² de la parcela cabrían orientativamente entre "
+            f"{_es(low)} y {_es(high)} kWp con estructura fija sobre suelo, que producirían "
+            f"del orden de {_es(low * kwh_per_kwp_year / 1000)} a "
+            f"{_es(high * kwh_per_kwp_year / 1000)} MWh al año. El rango es amplio a "
+            f"propósito: la ocupación real va de {M2_PER_KWP_DENSE} a {M2_PER_KWP_SPARSE} m² "
+            # Cada número se formatea por su cuenta con _es(): aplicar el cambio de
+            # separador sobre el párrafo entero se lleva por delante las comas de la prosa.
+            "por kWp según la separación entre filas, los viales y los retranqueos."
+        )
+
+    detail += (
+        " Es una estimación de capacidad física, no un proyecto: la viabilidad depende de "
+        "la capacidad de evacuación del nudo eléctrico más próximo y del planeamiento "
+        "urbanístico aplicable"
+    )
+    if has_permanent_cover(subplots):
+        detail += ", y el aprovechamiento que declara el Catastro exigiría cambio de uso"
+    if near_protected:
+        detail += ", con evaluación ambiental previa por la proximidad de espacios protegidos"
+    detail += ". No se estima plazo de amortización: dependería del coste de conexión al nudo "
+    detail += "y del precio de venta de la energía, que no se conocen."
+
     return Finding(
         severity=Severity.CONFORME,
         title=f"Aptitud fotovoltaica {level}",
-        detail=(
-            f"{value} kWh/kWp·año estimados para instalación fija con ángulo óptimo. "
-            "La aptitud fotovoltaica no implica viabilidad: depende además de la capacidad "
-            "de evacuación del nudo más próximo y del planeamiento urbanístico aplicable."
-        ),
+        detail=detail,
         source="PVGIS © Unión Europea",
-        confidence=Confidence.ALTA,
+        # La potencia estimada es una inferencia nuestra sobre la superficie, no un dato
+        # que publique nadie.
+        confidence=Confidence.MEDIA if area_m2 else Confidence.ALTA,
     )
 
 

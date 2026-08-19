@@ -11,6 +11,7 @@ from pathlib import Path
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
 from app.core.logger import get_logger
+from app.reports import findings as interpret
 
 logger = get_logger(__name__)
 
@@ -40,6 +41,9 @@ def _es_percent(value: float | None, decimals: int = 1) -> str:
 
 _env.filters["es_number"] = _es_number
 _env.filters["es_percent"] = _es_percent
+# La misma regla que en los hallazgos: el SNCZI encadena varias denominaciones en un campo
+# y la tabla las heredaba enteras.
+_env.filters["es_name"] = interpret.named_feature
 
 SEVERITY_CLASS = {
     "INCIDENCIA": "c-crit",
