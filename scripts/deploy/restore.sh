@@ -11,7 +11,7 @@ set -euo pipefail
 DUMP="${1:?Falta el fichero de volcado}"
 [ -f "$DUMP" ] || { echo "No existe $DUMP" >&2; exit 1; }
 
-COMPOSE="docker compose -f docker-compose.yml -f docker-compose.prod.yml"
+COMPOSE="docker compose --env-file .env.production -f docker-compose.yml -f docker-compose.prod.yml"
 
 echo "Restaurando $DUMP ($(du -h "$DUMP" | cut -f1))…"
 
