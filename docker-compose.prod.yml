@@ -1,6 +1,12 @@
 # Producción. Se usa junto al fichero base, que aporta la definición de los servicios:
 #
-#     docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+#     docker compose --env-file .env.production \
+#         -f docker-compose.yml -f docker-compose.prod.yml up -d
+#
+# El --env-file es obligatorio y no es lo mismo que el env_file de cada servicio: este
+# alimenta la sustitución de ${POSTGRES_USER} y compañía, que la hace Compose al leer el
+# YAML. Sin él, Compose solo mira un fichero llamado .env y arranca Postgres con usuario y
+# contraseña vacíos.
 #
 # Lo que cambia respecto a local, y por qué:
 #
@@ -18,7 +24,9 @@ services:
     ports: !override []
     volumes: !override
       - reports_data:/data/reports
-    env_file:
+    # !override y no una lista a secas: las listas de env_file se CONCATENAN entre ficheros,
+    # así que sin esto seguiría exigiendo el .env de local, que en el servidor no existe.
+    env_file: !override
       - .env.production
     restart: unless-stopped
     command: uv run uvicorn app.main:app --host 0.0.0.0 --port 8000 --proxy-headers --forwarded-allow-ips='*'
@@ -26,7 +34,7 @@ services:
   worker:
     volumes: !override
       - reports_data:/data/reports
-    env_file:
+    env_file: !override
       - .env.production
     restart: unless-stopped
     # Concurrencia 1: renderizar un PDF con seis ortofotos incrustadas es lo que más
