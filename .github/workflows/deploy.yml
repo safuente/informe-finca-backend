@@ -51,19 +51,28 @@ jobs:
       # que devuelva quien conteste es confiar en la red del runner. Con la huella fijada, un
       # servidor suplantado hace fallar el despliegue en lugar de recibir el push.
       - name: Configurar la clave SSH
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
         run: |
           install -d -m 700 ~/.ssh
-          printf '%s\n' "${{ secrets.DEPLOY_SSH_KEY }}" > ~/.ssh/id_ed25519
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/id_ed25519
           chmod 600 ~/.ssh/id_ed25519
-          printf '%s\n' "${{ secrets.DEPLOY_KNOWN_HOSTS }}" > ~/.ssh/known_hosts
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > ~/.ssh/known_hosts
 
       # El script viaja desde el checkout, así que se ejecuta la versión de este commit y no
       # la que hubiera en el servidor.
       - name: Desplegar
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
         run: |
+          # tr -d: los secretos de GitHub conservan el salto de línea final si se pegaron
+          # con él, y ssh rechaza «root@1.2.3.4\n» con «hostname contains invalid
+          # characters». Limpiarlo aquí evita que un pegado descuidado rompa el despliegue.
+          host=$(printf '%s' "$DEPLOY_HOST" | tr -d '[:space:]')
           ssh -i ~/.ssh/id_ed25519 \
               -o BatchMode=yes \
-              "root@${{ secrets.DEPLOY_HOST }}" \
+              "root@$host" \
               'bash -s' < scripts/deploy/remote.sh
 
       # Comprobación de extremo a extremo, y por el dominio público: pasa por DNS, por el
