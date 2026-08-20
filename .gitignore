@@ -148,7 +148,12 @@ activemq-data/
 *.sage.py
 
 # Environments
+# Los .env reales nunca suben (llevan la clave de Stripe y la contraseña de Postgres);
+# los .example sí, que son la plantilla.
 .env
+.env.*
+!.env.example
+!.env.production.example
 .envrc
 .venv
 env/
