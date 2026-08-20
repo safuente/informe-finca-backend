@@ -15,12 +15,25 @@ COMPOSE="docker compose --env-file .env.production -f docker-compose.yml -f dock
 
 echo "Restaurando $DUMP ($(du -h "$DUMP" | cut -f1))…"
 
-# -j4: pg_restore paraleliza la carga de datos y la creación de índices. Los índices GiST
-# sobre 2 millones de geometrías son la parte lenta, y es la que más se beneficia.
+# El volcado se copia DENTRO del contenedor en vez de mandarlo por la entrada estándar.
+# pg_restore en paralelo necesita poder saltar por el fichero, y un flujo por stdin no se
+# puede rebobinar: falla con «parallel restore from standard input is not supported».
+# Se podría quitar el -j4 y restaurar en serie, pero sale mucho más caro que los minutos que
+# cuesta la copia: reconstruir los índices GiST sobre dos millones de geometrías es la parte
+# lenta de todo esto, y es precisamente la que se reparte entre núcleos.
+REMOTE_DUMP="/tmp/$(basename "$DUMP")"
+cleanup() { $COMPOSE exec -T db rm -f "$REMOTE_DUMP" >/dev/null 2>&1 || true; }
+trap cleanup EXIT
+
+echo "Copiando al contenedor…"
+$COMPOSE cp "$DUMP" "db:$REMOTE_DUMP"
+
+# -j4: pg_restore paraleliza la carga de datos y la creación de índices.
 $COMPOSE exec -T db pg_restore \
   -U "${POSTGRES_USER:-postgres}" \
   -d "${POSTGRES_DB:-informefinca}" \
-  --no-owner --no-privileges --clean --if-exists -j4 < "$DUMP"
+  --no-owner --no-privileges --clean --if-exists -j4 \
+  "$REMOTE_DUMP"
 
 echo
 echo "Comprobación:"
