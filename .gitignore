@@ -229,3 +229,4 @@ data/
 *.pdf
 demo-report.html
 .DS_Store
+*.dump
