@@ -37,3 +37,48 @@ api.informefinca.es {
 		}
 	}
 }
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Web pública (Astro estático). Se sirve desde este mismo Caddy porque los
+# puertos 80 y 443 ya están ocupados por él: un segundo contenedor no podría
+# escucharlos. Los ficheros llegan por rsync desde el Mac a /opt/informefinca-web,
+# montado como /srv/web de solo lectura. No hay build ni Node en el servidor.
+#
+# Al contrario que api., aquí la nube naranja de Cloudflare SÍ interesa cuando se
+# quiera CDN: este bloque no depende de la IP del visitante. Si se enciende, hay
+# que poner SSL/TLS en «Full (strict)» a la vez, o Cloudflare entra por HTTP,
+# Caddy redirige a HTTPS y se forma un bucle.
+informefinca.es {
+	root * /srv/web
+	encode zstd gzip
+
+	# Astro genera una carpeta por página con su index.html, así que file_server
+	# resuelve las URLs con barra final tal cual. Solo falta la página de error.
+	handle_errors {
+		rewrite * /404.html
+		file_server
+	}
+
+	# Los assets llevan hash en el nombre y las fuentes no cambian nunca: un año
+	# de caché es gratis. El HTML corto, para que una corrección de precio o de
+	# texto legal no se quede pegada en el navegador de nadie.
+	@immutable path /_astro/* /fonts/*
+	header @immutable Cache-Control "public, max-age=31536000, immutable"
+
+	@html path *.html /
+	header @html Cache-Control "public, max-age=300, must-revalidate"
+
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		-Server
+	}
+
+	file_server
+}
+
+# www al dominio principal: dos hosts sirviendo lo mismo parten el SEO.
+www.informefinca.es {
+	redir https://informefinca.es{uri} permanent
+}
