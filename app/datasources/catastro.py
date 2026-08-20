@@ -13,7 +13,13 @@ from dataclasses import dataclass, field
 
 from shapely.geometry import MultiPolygon, Polygon
 
-from app.datasources.exceptions import DataSourceError, GeometryUnavailable, ParcelNotFound
+from app.datasources.exceptions import (
+    DataSourceError,
+    GeometryUnavailable,
+    ParcelNotCovered,
+    ParcelNotFound,
+    ParcelNotRustic,
+)
 from app.datasources.http import find_text, http_client, strip_ns
 
 OVC_BASE = "https://ovc.catastro.meh.es/ovcservweb/OVCSWLocalizacionRC"
@@ -66,8 +72,26 @@ async def refcat_from_coords(lat: float, lon: float) -> str:
     return pc1 + pc2
 
 
+# En una referencia rústica los dos primeros dígitos son la provincia: 24155A11600027 es
+# León. Es lo único que hace falta para saber que una parcela está fuera de cobertura sin
+# gastar una llamada al OVC.
+FORAL_PROVINCES = {"01": "Álava", "20": "Gipuzkoa", "48": "Bizkaia", "31": "Navarra"}
+
+
+def foral_province(refcat: str) -> str | None:
+    """Nombre del territorio foral si la referencia es de uno, o None."""
+    return FORAL_PROVINCES.get(refcat[:2]) if len(refcat) >= 2 else None
+
+
 async def fetch_cadastral_data(refcat: str) -> CadastralData:
     """Non-protected data: use, area and crop subplots."""
+    if territorio := foral_province(refcat):
+        raise ParcelNotCovered(
+            f"La referencia {refcat} está en {territorio}, que mantiene un catastro foral "
+            "propio y no se publica en los servicios del Estado. Todavía no podemos "
+            "elaborar informes ahí."
+        )
+
     root = await _get_xml(OVC_DNPRC, {"Provincia": "", "Municipio": "", "RC": refcat})
 
     error_code = find_text(root, "cod")
@@ -80,8 +104,26 @@ async def fetch_cadastral_data(refcat: str) -> CadastralData:
         province=find_text(root, "np"),
         use=find_text(root, "luso") or find_text(root, "cn"),
     )
+    cadastral_class = find_text(root, "cn").upper()
     if not data.municipality:
         raise ParcelNotFound(f"El Catastro no reconoce la referencia {refcat}")
+
+    # <cn> es la clase del inmueble: RU rústico, UR urbano. Se comprueba aquí y no más
+    # arriba porque es el único punto por el que pasan todas las entradas —vista previa,
+    # informe y refresco de caché— y porque así una parcela urbana no llega a guardarse.
+    if cadastral_class == "UR":
+        uso = find_text(root, "luso") or "urbano"
+        # Un rechazo es la única señal gratis de demanda que vas a recibir: quien llega
+        # aquí ya tenía la intención de comprar el informe. Se le invita a escribir, y de
+        # paso se sabe cuántos son y de qué tipo de suelo —un solar sin edificar no es lo
+        # mismo que un piso— antes de decidir si algún día se cubre.
+        raise ParcelNotRustic(
+            f"La referencia {refcat} corresponde a un inmueble urbano ({uso}). "
+            "Este informe solo cubre fincas rústicas: se construye sobre cartografía "
+            "agraria y ambiental, y sobre suelo urbano no respondería a lo que de verdad "
+            "decide la compra, que es el planeamiento municipal. Si se trata de un terreno "
+            "sin edificar y crees que sí encaja, escríbenos a contacto@informefinca.es."
+        )
 
     # <ssp> is the plot area; inside a <spr> block it means that subplot's area, so the
     # first occurrence (the outer one) is taken and the subplot total refines it below.

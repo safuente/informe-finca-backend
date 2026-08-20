@@ -586,6 +586,11 @@ M2_PER_KWP_SPARSE = 25
 
 # Por encima de esto, un promotor fotovoltaico se interesa por el emplazamiento.
 DEVELOPER_THRESHOLD = 1600
+# Por debajo de 2 ha no se dimensiona planta: la cuenta saldría igual —son 15-25 m²/kWp—
+# pero el resultado se leería como una oportunidad de venta de energía que no existe. Y
+# hasta 5 ha, un promotor rara vez estudia una parcela suelta.
+PLANT_MIN_AREA_M2 = 20_000
+DEVELOPER_MIN_AREA_M2 = 50_000
 
 # Cultivos declarados que obligan a cambio de uso antes de cualquier proyecto: la aptitud
 # física no sirve de nada si el suelo no admite la instalación.
@@ -651,7 +656,7 @@ def solar_finding(
         else f"por debajo del umbral habitual de los promotores (≈{threshold})."
     )
 
-    if area_m2 and area_m2 > 0:
+    if area_m2 and area_m2 >= PLANT_MIN_AREA_M2:
         low = area_m2 / M2_PER_KWP_SPARSE
         high = area_m2 / M2_PER_KWP_DENSE
         detail += (
@@ -664,22 +669,54 @@ def solar_finding(
             # separador sobre el párrafo entero se lleva por delante las comas de la prosa.
             "por kWp según la separación entre filas, los viales y los retranqueos."
         )
+        if area_m2 < DEVELOPER_MIN_AREA_M2:
+            detail += (
+                f" Aun así son {_es(area_m2 / 10_000).replace('.', ',')} ha: por debajo de "
+                f"{DEVELOPER_MIN_AREA_M2 // 10_000} ha la mayoría de los promotores no "
+                "estudia una parcela suelta, salvo que se agrupe con las colindantes."
+            )
+    elif area_m2 and area_m2 > 0:
+        detail += (
+            f" No se dimensiona una planta sobre los {_es(area_m2)} m² de la parcela: a esta "
+            "escala no interesa a un promotor, y dar una potencia invitaría a leer como "
+            "oportunidad de venta de energía lo que en realidad da para autoconsumo de una "
+            "explotación o una vivienda."
+        )
 
     detail += (
         " Es una estimación de capacidad física, no un proyecto: la viabilidad depende de "
         "la capacidad de evacuación del nudo eléctrico más próximo y del planeamiento "
         "urbanístico aplicable"
     )
-    if has_permanent_cover(subplots):
-        detail += ", y el aprovechamiento que declara el Catastro exigiría cambio de uso"
     if near_protected:
         detail += ", con evaluación ambiental previa por la proximidad de espacios protegidos"
-    detail += ". No se estima plazo de amortización: dependería del coste de conexión al nudo "
-    detail += "y del precio de venta de la energía, que no se conocen."
+    detail += "."
+
+    # El arbolado no es un trámite más de la lista: es lo primero que hay que resolver, y
+    # decirlo de pasada al final de un párrafo que empieza por «aptitud elevada» invita a
+    # leer como oportunidad una parcela en la que habría que talar. Va en su propia frase.
+    if has_permanent_cover(subplots):
+        detail += (
+            " Antes que nada está la cubierta: el Catastro declara aquí un aprovechamiento "
+            "permanente, así que instalar exigiría descuaje y cambio de uso, con autorización "
+            "del órgano forestal de la comunidad autónoma. No es un trámite de tramitación "
+            "ordinaria y puede denegarse."
+        )
+
+    detail += (
+        " No se estima plazo de amortización: dependería del coste de conexión al nudo y "
+        "del precio de venta de la energía, que no se conocen."
+    )
+
+    # El título es lo que se escanea en el resumen: si hay arbolado, la salvedad va ahí y
+    # no solo dentro del párrafo.
+    title = f"Aptitud fotovoltaica {level}"
+    if has_permanent_cover(subplots):
+        title += ", condicionada por la cubierta"
 
     return Finding(
         severity=Severity.CONFORME,
-        title=f"Aptitud fotovoltaica {level}",
+        title=title,
         detail=detail,
         source="PVGIS © Unión Europea",
         # La potencia estimada es una inferencia nuestra sobre la superficie, no un dato

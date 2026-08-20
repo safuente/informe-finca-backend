@@ -81,6 +81,14 @@ figcaption b{color:var(--ink)}
 /* Qué es cada sigla, bajo el nombre de la capa: quien compra no tiene por qué saber
    qué es una ZEPA, y buscarlo fuera del informe es trabajo que ya ha pagado. */
 .meaning{display:block;font-weight:400;font-size:.72rem;line-height:1.45;color:var(--mut);margin-top:3px}
+/* Vista previa: lo reservado se marca, no se difumina. Un blur invita a intentar leerlo;
+   decir qué hay detrás y qué cuesta convierte mejor y no engaña a nadie. */
+.locked{color:var(--mut);font-style:italic}
+.locked::before{content:"\1F512  "}
+.paywall{border:1.5px dashed var(--line);border-radius:6px;padding:16px 18px;margin-top:14px;text-align:center}
+.paywall .t{font-family:"DejaVu Serif",Georgia,serif;font-weight:700;font-size:1rem}
+.paywall .s{font-size:.82rem;color:var(--mut);margin-top:6px;line-height:1.6}
+.paywall .cta{display:inline-block;margin-top:12px;background:var(--ink);color:#fff;border-radius:6px;padding:9px 18px;font-weight:600;font-size:.86rem;text-decoration:none}
 ol.rec{margin:10px 0 0 1.1rem} ol.rec li{margin:.5rem 0;font-size:.86rem}
 ul.caveats{margin:10px 0 0 1.1rem;font-size:.82rem;color:var(--amber)}
 footer{font-size:.7rem;color:var(--mut);margin-top:20px;line-height:1.7}
@@ -90,7 +98,7 @@ footer{font-size:.7rem;color:var(--mut);margin-top:20px;line-height:1.7}
 <div class="wrap">
 
 {% if demo %}
-<div class="demo">DOCUMENTO DE DEMOSTRACIÓN — datos e imágenes simulados</div>
+<div class="demo">{{ notice }}</div>
 {% endif %}
 
 <header class="doc">
@@ -103,8 +111,14 @@ footer{font-size:.7rem;color:var(--mut);margin-top:20px;line-height:1.7}
   </div>
   <div class="dictamen">
     <div class="lbl">Dictamen</div>
+    {% if preview %}
+    <div class="val locked">Reservado al informe completo</div>
+    <div class="sub">El dictamen resume en una línea si la finca puede comprarse tal cual,
+      con qué salvedades o con qué aclaración previa.</div>
+    {% else %}
     <div class="val">{{ dictamen.verdict }}</div>
     <div class="sub">{{ dictamen.summary }}</div>
+    {% endif %}
   </div>
 </header>
 
@@ -117,8 +131,10 @@ footer{font-size:.7rem;color:var(--mut);margin-top:20px;line-height:1.7}
     {% for finding in findings %}
     <tr>
       <td><span class="chip {{ severity_class.get(finding.severity, 'c-info') }}">{{ finding.severity }}</span></td>
-      <td><b>{{ finding.title }}.</b> {{ finding.detail }}</td>
-      <td>{{ finding.source }}<br><span class="conf">{{ finding.confidence }}{% if finding.confidence == 'MEDIA' %} · inferencia{% else %} · oficial{% endif %}</span></td>
+      <td><b>{{ finding.title }}.</b>
+        {%- if preview %} <span class="locked">Qué superficie afecta, qué implica y qué hacer antes de firmar</span>
+        {%- else %} {{ finding.detail }}{% endif %}</td>
+      <td>{{ finding.source }}{% if not preview %}<br><span class="conf">{{ finding.confidence }}{% if finding.confidence == 'MEDIA' %} · inferencia{% else %} · oficial{% endif %}</span>{% endif %}</td>
     </tr>
     {% endfor %}
   </table>
@@ -165,7 +181,10 @@ footer{font-size:.7rem;color:var(--mut);margin-top:20px;line-height:1.7}
   <p class="src">El Catastro no detalla subparcelas de cultivo para esta parcela.</p>
   {% endif %}
 
-  {% if chart %}
+  {% if preview %}
+  <p class="locked">Ocho años de índice de vegetación (Sentinel-2) mes a mes, con la lectura
+    prudente de si hay ciclo de cultivo o cubierta permanente.</p>
+  {% elif chart %}
   <figure style="margin-top:14px">
     <svg viewBox="0 0 {{ chart.width }} {{ chart.height }}" style="background:#fafbf8">
       <g stroke="#e3e6df" stroke-width="1">
@@ -197,7 +216,15 @@ footer{font-size:.7rem;color:var(--mut);margin-top:20px;line-height:1.7}
 </section>
 
 <!-- 3 MULTITEMPORAL -->
-{% if orthophotos %}
+{% if preview %}
+<section>
+  <span class="sec-num">3 · Análisis multitemporal</span>
+  <h2>Ortofotografía oficial</h2>
+  <p class="locked">Seis vuelos del IGN sobre esta parcela, del vuelo americano de 1956 al PNOA
+    más reciente, para comprobar sobre la imagen si hay construcciones que el Catastro no
+    declara y desde cuándo están. Es la sección que no se puede replicar en cinco minutos.</p>
+</section>
+{% elif orthophotos %}
 <section>
   <span class="sec-num">3 · Análisis multitemporal</span>
   <h2>Ortofotografía oficial</h2>
@@ -228,7 +255,10 @@ footer{font-size:.7rem;color:var(--mut);margin-top:20px;line-height:1.7}
     <tr>
       <td>{{ layer.label }}{% if layer.meaning %}<span class="meaning">{{ layer.meaning }}</span>{% endif %}</td>
       <td>
-        {% if layer.intersects and layer.geometry == 'line' %}
+        {% if preview %}
+          <span class="locked">Resultado medido sobre la geometría de la parcela: superficie o
+          longitud afectada, elemento más próximo y distancia</span>
+        {% elif layer.intersects and layer.geometry == 'line' %}
           El eje discurre {{ layer.length_m | es_number }} m dentro de la parcela{% if layer.feature_names %}: {{ layer.feature_names | join(', ') }}{% endif %}. Anchura legal a verificar en el acto de clasificación.
         {% elif layer.intersects %}
           Intersección de {{ layer.area_m2 | es_number }} m² ({{ layer.area_ratio | es_percent }} de la parcela){% if layer.feature_names %}: {{ layer.feature_names | join(', ') }}{% endif %}.
@@ -253,7 +283,14 @@ footer{font-size:.7rem;color:var(--mut);margin-top:20px;line-height:1.7}
 </section>
 
 <!-- 5 POTENCIAL -->
-{% if solar %}
+{% if preview %}
+<section>
+  <span class="sec-num">5 · Potencial de aprovechamiento</span>
+  <h2>Indicadores</h2>
+  <p class="locked">Producción fotovoltaica específica del emplazamiento según PVGIS, con lo
+    que condiciona una instalación en esta parcela concreta.</p>
+</section>
+{% elif solar %}
 <section>
   <span class="sec-num">5 · Potencial de aprovechamiento</span>
   <h2>Indicadores</h2>
@@ -281,10 +318,28 @@ footer{font-size:.7rem;color:var(--mut);margin-top:20px;line-height:1.7}
 <section>
   <span class="sec-num">6 · Recomendaciones previas a la transmisión</span>
   <h2>Actuaciones</h2>
+  {% if preview %}
+  <p class="locked">Las actuaciones concretas —a quién dirigirse, qué pedir y en qué orden—
+    forman parte del informe completo.</p>
+  {% else %}
   <ol class="rec">
     {% for item in recommendations %}<li>{{ item }}</li>{% endfor %}
   </ol>
+  {% endif %}
 </section>
+
+{% if preview %}
+<div class="paywall">
+  <div class="t">Esto es la vista previa gratuita</div>
+  <div class="s">
+    Las comprobaciones sobre cartografía oficial ya están hechas y su resultado es el que ves.
+    El informe completo añade, para esta misma parcela, qué significa cada hallazgo y qué hacer,
+    la serie de ortofotos de 1956 a hoy para ver si hay construcciones sin declarar, ocho años de
+    NDVI y el potencial fotovoltaico.
+  </div>
+  <a class="cta" href="{{ checkout_url or '#' }}">Ver el informe completo — {{ price_label }}</a>
+</div>
+{% endif %}
 
 <footer>
   <b>Metodología y fuentes.</b>

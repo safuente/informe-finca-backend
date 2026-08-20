@@ -1,0 +1,39 @@
+# Caddy consigue el certificado de Let's Encrypt y lo renueva solo, y reenvía al contenedor
+# de la API. Se elige frente a nginx por eso: con nginx hay que montar certbot y un cron, y
+# un certificado caducado un domingo es una caída total sin nadie de guardia.
+#
+# Montaje previsto: el registro DNS de api.informefinca.es apunta DIRECTO a este servidor
+# (en Cloudflare, nube gris / «DNS only»). Cloudflare sigue siendo el DNS del dominio, pero
+# no se interpone en el tráfico. Así la IP que ve la API es la del visitante de verdad, sin
+# cabeceras de por medio, y el limitador de la vista previa —lo que protege nuestro acceso
+# al Catastro— funciona sin poder falsearse.
+#
+# Si algún día hace falta encender el proxy de Cloudflare (nube naranja), son DOS cambios y
+# van juntos o ninguno:
+#   1. aquí, `reverse_proxy app:8000 { header_up X-Forwarded-For {http.request.header.CF-Connecting-IP} }`
+#      porque con el proxy la X-Forwarded-For que llega la puede haber escrito el visitante;
+#   2. en el cortafuegos, admitir 80 y 443 solo desde los rangos de Cloudflare, para que
+#      nadie pueda conectarse directo a la IP del servidor y mandar cabeceras inventadas.
+# Con solo el punto 1, saltarse el límite sería tan fácil como cambiar de IP en cada
+# petición.
+api.informefinca.es {
+	reverse_proxy app:8000
+
+	encode gzip
+
+	# Los orígenes permitidos los aplica FastAPI con CORS_ORIGINS; esto es defensa en
+	# profundidad de cabeceras.
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		-Server
+	}
+
+	log {
+		output file /data/access.log {
+			roll_size 10MiB
+			roll_keep 5
+		}
+	}
+}

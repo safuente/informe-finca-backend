@@ -353,9 +353,10 @@ def test_solar_without_area_gives_only_the_yield():
 
 
 def test_solar_with_area_estimates_power_as_a_range():
-    finding = interpret.solar_finding(1680.0, area_m2=7193.0)
-    # 7.193 m² entre 25 y 15 m²/kWp
-    assert "288" in finding.detail and "480" in finding.detail
+    # 10 ha: superficie en la que dimensionar una planta sí significa algo.
+    finding = interpret.solar_finding(1680.0, area_m2=100_000.0)
+    # 100.000 m² entre 25 y 15 m²/kWp
+    assert "4.000" in finding.detail and "6.667" in finding.detail
     assert "MWh al año" in finding.detail
     # Es una inferencia nuestra sobre la superficie, no un dato oficial.
     assert finding.confidence is Confidence.MEDIA
@@ -365,15 +366,17 @@ def test_solar_with_area_estimates_power_as_a_range():
 
 def test_solar_never_estimates_payback():
     """Amortización y coste dependen del nudo de evacuación y del precio de venta."""
-    finding = interpret.solar_finding(1680.0, area_m2=7193.0)
+    finding = interpret.solar_finding(1680.0, area_m2=100_000.0)
     assert "No se estima plazo de amortización" in finding.detail
     for palabra in ("años de amortización", "€/kWh", "coste de instalación"):
         assert palabra not in finding.detail
 
 
 def test_solar_names_what_blocks_the_project():
-    monte = [{"crop": "MONTE BAJO", "intensity": "07", "area_m2": 7193.0}]
-    finding = interpret.solar_finding(1680.0, area_m2=7193.0, subplots=monte, near_protected=True)
+    monte = [{"crop": "MONTE BAJO", "intensity": "07", "area_m2": 100_000.0}]
+    finding = interpret.solar_finding(
+        1680.0, area_m2=100_000.0, subplots=monte, near_protected=True
+    )
     assert "cambio de uso" in finding.detail
     assert "evaluación ambiental" in finding.detail
 
@@ -418,3 +421,52 @@ def test_a_single_name_is_left_exactly_as_the_cartography_says_it():
     finding = interpret.layer_findings([period("snczi_t500", distance_m=1_240.0)])[0]
     assert "«Río Turienzo»" in finding.detail
     assert "denominaciones" not in finding.detail
+
+
+def test_a_small_parcel_gets_no_plant_sizing():
+    """0,7 ha admiten la cuenta, pero el resultado se leería como una oportunidad falsa."""
+    finding = interpret.solar_finding(1680.0, area_m2=7_193.0)
+    assert "kWp con estructura fija" not in finding.detail
+    assert "autoconsumo" in finding.detail
+    assert "288" not in finding.detail
+
+
+def test_a_mid_sized_parcel_is_sized_but_warned():
+    finding = interpret.solar_finding(1680.0, area_m2=30_000.0)
+    assert "kWp con estructura fija" in finding.detail
+    assert "no estudia una parcela suelta" in finding.detail
+
+
+def test_a_large_parcel_keeps_the_plain_estimate():
+    finding = interpret.solar_finding(1680.0, area_m2=1_270_096.0)
+    assert "kWp con estructura fija" in finding.detail
+    assert "no estudia una parcela suelta" not in finding.detail
+
+
+def test_tree_cover_is_stated_as_the_first_obstacle():
+    """Decirlo de pasada tras «aptitud elevada» invita a leer como oportunidad un pinar."""
+    pinar = [{"crop": "PINAR PINEA O DE FRUTO", "area_m2": 7_014.0, "intensity": "02"}]
+    finding = interpret.solar_finding(1680.0, area_m2=7_193.0, subplots=pinar)
+    assert "descuaje" in finding.detail
+    assert "puede denegarse" in finding.detail
+
+
+def test_the_preview_never_ships_the_detail_it_withholds():
+    """Ocultar el detalle con CSS no es ocultarlo: se lee en el inspector.
+
+    Este test fija el contrato del payload de vista previa —severidad, título y fuente, y
+    nada más— para que el detalle no pueda colarse al añadir un campo más adelante.
+    """
+    from app.reports.schemas import Finding
+
+    finding = Finding(
+        severity=Severity.INCIDENCIA,
+        title="Un cauce atraviesa la parcela",
+        detail="El eje discurre 2.619 m dentro de la parcela…",
+        source="IGN",
+        confidence=Confidence.MEDIA,
+    )
+    preview = {"severity": finding.severity.value, "title": finding.title, "source": finding.source}
+
+    assert set(preview) == {"severity", "title", "source"}
+    assert finding.detail not in str(preview)

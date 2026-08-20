@@ -156,6 +156,89 @@ async def build_payload(session: AsyncSession, report: Report) -> tuple[dict, in
 _SEVERITY_ORDER = ["INCIDENCIA", "AFECCIÓN", "OBSERVACIÓN", "CONFORME"]
 
 
+async def build_preview_payload(session: AsyncSession, refcat: str) -> dict:
+    """La vista previa gratuita: el mismo informe, con lo caro sin calcular.
+
+    El corte no es por valor sino por coste, y resulta que coinciden al revés de lo que uno
+    esperaría. Las afecciones legales —lo que de verdad decide una compra— salen de una
+    consulta a PostGIS y no cuestan nada; las ortofotos, el NDVI y el solar son llamadas a
+    servicios públicos ajenos, con cuota y con reputación que cuidar. Así que se regala lo
+    valioso y se reserva lo caro, y de paso un curioso no puede quemarle a nadie su cuota
+    de Copernicus.
+
+    De cada hallazgo viajan severidad y título; el detalle se queda fuera del payload —no
+    oculto por CSS— porque lo que no sale del servidor no se puede leer en el inspector.
+    """
+    layer_service = LayerService(LayerRepository(session))
+    parcel_service = ParcelService(ParcelRepository(session), layer_service)
+
+    parcel = await parcel_service.get_or_fetch(refcat)
+    area = parcel_service.compare_areas(parcel)
+    reference_area = parcel.measured_area_m2 or parcel.cadastral_area_m2
+    hits, coverage = await layer_service.hits_for_parcel(parcel.id, reference_area)
+
+    # La hidrografía sí entra, aunque sea una llamada externa. No por conversión: sin ella
+    # una parcela atravesada por un cauce saldría con todo en CONFORME, y eso es decir «aquí
+    # no hay nada» sobre algo que no se ha mirado. Son dos peticiones al WFS del IGN, muy
+    # por debajo de las seis ortofotos o de la cuota de Copernicus.
+    geometry = await parcel_service.geometry_wgs84(parcel)
+    watercourses, water_bodies = await asyncio.gather(
+        ign_hidrografia.fetch_watercourses(geometry),
+        ign_hidrografia.fetch_water_bodies(geometry),
+    )
+    crosses, distance_m, inside_m = await parcel_service.repository.measure_against_lines(
+        parcel.id, [course.wkt for course in watercourses]
+    )
+    water_inside_m2, water_distance_m = await parcel_service.repository.measure_against_polygons(
+        parcel.id, [body.wkt for body in water_bodies]
+    )
+
+    collected: list[Finding] = [interpret.area_finding(area)]
+    collected.extend(interpret.layer_findings(hits))
+    if water := interpret.watercourse_finding(
+        crosses, distance_m, inside_m, next((c.name for c in watercourses if c.name), None)
+    ):
+        collected.append(water)
+    if pond := interpret.water_body_finding(
+        water_inside_m2, water_distance_m, next((b.name for b in water_bodies if b.name), None)
+    ):
+        collected.append(pond)
+    collected.sort(key=lambda finding: _SEVERITY_ORDER.index(finding.severity))
+
+    return {
+        "generated_at": datetime.now(UTC).isoformat(),
+        "reference": "VISTA PREVIA",
+        "preview": True,
+        "parcel": {
+            "refcat": parcel.refcat,
+            "municipality": parcel.municipality,
+            "province": parcel.province,
+            "use": parcel.use,
+            "cadastral_area_m2": parcel.cadastral_area_m2,
+            "built_area_m2": parcel.built_area_m2,
+            "measured_area_m2": parcel.measured_area_m2,
+            "lat": parcel.lat,
+            "lon": parcel.lon,
+            "subplots": parcel.subplots or [],
+        },
+        "area": area.model_dump(),
+        # Sin dictamen: es el veredicto, y es lo que se compra.
+        "dictamen": None,
+        "findings": [
+            {"severity": f.severity.value, "title": f.title, "source": f.source} for f in collected
+        ],
+        "layers": [hit.model_dump(mode="json") for hit in hits],
+        "caveats": interpret.coverage_caveats(coverage, BY_CODE),
+        "orthophotos": [],
+        "ndvi": [],
+        "watercourses": None,
+        "water_bodies": None,
+        "solar": None,
+        "recommendations": [],
+        "sources": _sources(hits, False, False, False, bool(watercourses or water_bodies)),
+    }
+
+
 def _sources(
     hits, has_imagery: bool, has_solar: bool, has_ndvi: bool, has_water: bool = False
 ) -> list[str]:

@@ -1,0 +1,71 @@
+# Producción. Se usa junto al fichero base, que aporta la definición de los servicios:
+#
+#     docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+#
+# Lo que cambia respecto a local, y por qué:
+#
+#   · Postgres y Redis dejan de publicar puertos. En local es cómodo abrir psql desde el
+#     portátil; en un servidor con IP pública significa exponer la base de datos a internet
+#     entera. Se llega a ellos por la red interna de Docker, y para depurar, por SSH.
+#   · El código deja de montarse como volumen. En local `.:/app` da recarga en caliente; en
+#     producción haría que el contenedor ejecutara lo que haya en el disco del servidor en
+#     lugar de lo que se construyó y probó.
+#   · Todo se reinicia solo. Un reinicio del servidor a las cuatro de la mañana no puede
+#     dejar el producto caído hasta que alguien lo mire.
+#   · Caddy delante, que resuelve el certificado de api.informefinca.es sin intervención.
+services:
+  app:
+    ports: !override []
+    volumes: !override
+      - reports_data:/data/reports
+    env_file:
+      - .env.production
+    restart: unless-stopped
+    command: uv run uvicorn app.main:app --host 0.0.0.0 --port 8000 --proxy-headers --forwarded-allow-ips='*'
+
+  worker:
+    volumes: !override
+      - reports_data:/data/reports
+    env_file:
+      - .env.production
+    restart: unless-stopped
+    # Concurrencia 1: renderizar un PDF con seis ortofotos incrustadas es lo que más
+    # memoria pide de todo el sistema, y con 8 GB compartidos con PostGIS no interesa que
+    # ocurra dos veces a la vez. Con un informe cada 20 segundos, la cola no es el problema.
+    command: uv run celery -A app.core.celery_app.celery_app worker --loglevel=INFO --concurrency=1
+
+  db:
+    ports: !override []
+    restart: unless-stopped
+    # Ajustes para una máquina de 8 GB compartida con la aplicación. shared_buffers es la
+    # caché propia de Postgres; el resto de la RAM la aprovecha igualmente a través de la
+    # caché del sistema, así que subirlo más resta en vez de sumar.
+    command: >
+      postgres
+      -c shared_buffers=2GB
+      -c effective_cache_size=5GB
+      -c maintenance_work_mem=512MB
+      -c work_mem=32MB
+      -c random_page_cost=1.1
+      -c max_connections=50
+
+  redis:
+    ports: !override []
+    restart: unless-stopped
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - app
+
+volumes:
+  caddy_data:
+  caddy_config:

@@ -10,6 +10,7 @@ from pathlib import Path
 
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
+from app.core.config import settings
 from app.core.logger import get_logger
 from app.reports import findings as interpret
 
@@ -93,13 +94,31 @@ def ndvi_chart(series: list[dict]) -> dict | None:
     }
 
 
-def render_html(payload: dict, *, demo: bool = False) -> str:
+DEMO_NOTICE = "DOCUMENTO DE DEMOSTRACIÓN — datos e imágenes simulados"
+SAMPLE_NOTICE = (
+    "INFORME REAL DE EJEMPLO — parcela y datos auténticos, emitido en la fecha que consta. "
+    "Publicado con fines de muestra; cualquiera puede comprobar sus fuentes."
+)
+
+
+def render_html(
+    payload: dict, *, demo: bool = False, notice: str | None = None, checkout_url: str = ""
+) -> str:
+    """`notice` sustituye al banner de demostración: mismo hueco, otro texto.
+
+    Publicar como ejemplo un informe de una parcela real obliga a decir dos cosas a la vez
+    —que los datos no están inventados y que el documento no se ha generado para quien lo
+    está leyendo—, y ninguna de las dos cabe en el aviso de «datos simulados».
+    """
     template = _env.get_template("report.html.j2")
     return template.render(
         **payload,
         chart=ndvi_chart(payload.get("ndvi") or []),
         severity_class=SEVERITY_CLASS,
-        demo=demo,
+        demo=demo or bool(notice),
+        notice=notice or DEMO_NOTICE,
+        checkout_url=checkout_url,
+        price_label=f"{settings.report_price_eur} €",
     )
 
 

@@ -7,7 +7,11 @@ from shapely.geometry.base import BaseGeometry
 from app.core.config import settings
 from app.core.logger import get_logger
 from app.datasources import catastro
-from app.datasources.exceptions import DataSourceError
+from app.datasources.exceptions import (
+    DataSourceError,
+    ParcelNotCovered,
+    ParcelNotRustic,
+)
 from app.layers.service import LayerService
 from app.parcels.exceptions import ParcelUnavailable
 from app.parcels.models import Parcel
@@ -52,6 +56,8 @@ class ParcelService:
         try:
             data = await catastro.fetch_cadastral_data(refcat)
             geometry = await catastro.fetch_geometry(refcat)
+        except (ParcelNotRustic, ParcelNotCovered):
+            raise
         except DataSourceError as exc:
             raise ParcelUnavailable(str(exc)) from exc
 
