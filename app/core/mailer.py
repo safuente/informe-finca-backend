@@ -14,7 +14,12 @@ logger = get_logger(__name__)
 
 
 def send_email(
-    to: str, subject: str, body: str, *, attachment: tuple[str, bytes] | None = None
+    to: str,
+    subject: str,
+    body: str,
+    *,
+    attachment: tuple[str, bytes] | None = None,
+    reply_to: str = "",
 ) -> bool:
     """Return True if the message was handed to the SMTP server."""
     if not settings.mail_enabled:
@@ -25,6 +30,10 @@ def send_email(
     message["From"] = f"{settings.mail_from_name} <{settings.mail_from}>"
     message["To"] = to
     message["Subject"] = subject
+    # Con Reply-To, responder al aviso de interés escribe a quien preguntó y no a
+    # nuestro propio buzón, que es de donde sale el mensaje.
+    if reply_to:
+        message["Reply-To"] = reply_to
     message.set_content(body)
 
     if attachment is not None:
